@@ -6,7 +6,7 @@ area_resize_ratio=(0.01 0.005 0.01)
 smooth_r=(1. 1. 1e5)
 for split_ in 0
 do
-  python main.py --init_method "tcp://localhost:9988" --device "0 1 2 3" \
+  python main.py --init_method "tcp://localhost:9988" --device "0, 1, 2, 3" \
   --cfg method_config/VISION_V1/Train/SOFS.yaml --prior_layer_pointer 5 6 7 8 9 10 \
   --opts NUM_GPUS 4 DATASET.split $split_ \
   TRAIN_SETUPS.epochs 1 TRAIN_SETUPS.TEST_SETUPS.epoch_test 1 TRAIN_SETUPS.TEST_SETUPS.train_miou 1 \
