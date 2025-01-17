@@ -1,5 +1,6 @@
-export TORCH_USE_RTLD_GLOBAL=YES
+#!/bin/bash
 
+export TORCH_USE_RTLD_GLOBAL=YES
 
 area_resize_ratio=(0.01 0.005 0.01)
 smooth_r=(1. 1. 1e5)

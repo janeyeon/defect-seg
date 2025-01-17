@@ -21,7 +21,7 @@ DATASET:
   split: 0
 
   vision_data_save: True
-  vision_data_save_path: "/home2/hyun/DefectSeg/SOFS/vision_data_new"
+  vision_data_save_path: "./vision_data_new"
   vision_data_load: False
 
   normal_sample_sampling_prob: 0.3
@@ -30,11 +30,11 @@ TRAIN:
   enable: True
   save_model: False
   method: 'SOFS'
-  dataset_path: '/home2/hyun/DefectSeg/data/Vision_v1'
+  dataset_path: '../data/Vision_v1'
 
   backbone: 'dinov2_vitb14'
   backbone_load_state_dict: True
-  backbone_checkpoint: '/home2/hyun/DefectSeg/SOFS/backbones/dinov2_vitb14_pretrain.pth'
+  backbone_checkpoint: './backbones/dinov2_vitb14_pretrain.pth'
 
   load_checkpoint: False
   load_model_path: "./"
@@ -80,7 +80,7 @@ TRAIN_SETUPS:
 TEST:
   enable: False
   method: 'SOFS'
-  dataset_path: '/home2/hyun/DefectSeg/data/Vision_v1'
+  dataset_path: '../data/Vision_v1'
   load_checkpoint: False
   load_model_path: "./save_model"
 

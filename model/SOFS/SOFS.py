@@ -84,8 +84,6 @@ class SOFS(nn.Module):
         )
 
     def encode_feature(self, x):
-        
-        
         self.outputs.clear()
         with torch.no_grad():
             _ = self.backbone(x)
