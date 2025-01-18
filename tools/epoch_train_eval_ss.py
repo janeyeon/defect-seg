@@ -47,8 +47,7 @@ def epoch_train_ss(train_loader, model, optimizer, epoch, cfg, validate_each_cla
         model.backbone.eval()
 
     if epoch == 1:
-        if is_master_proc():
-            LOGGER.info("backbone eval mode, model train")
+        LOGGER.info("backbone eval mode, model train")
 
     end = time.time()
     val_time = 0.
@@ -60,6 +59,10 @@ def epoch_train_ss(train_loader, model, optimizer, epoch, cfg, validate_each_cla
 
 
     for i, data in enumerate(train_loader):
+
+        # if i % 100 != 0:
+        #     continue        
+        
         data_time.update(time.time() - end)
         current_iter = (epoch - 1) * len(train_loader) + i + 1
 
@@ -121,23 +124,26 @@ def epoch_train_ss(train_loader, model, optimizer, epoch, cfg, validate_each_cla
         batch_time.update(time.time() - end - val_time)
         end = time.time()
 
+    
     iou_class = intersection_meter.sum / (union_meter.sum + 1e-10)
     # recall
     recall_class = intersection_meter.sum / (target_meter.sum + 1e-10)  # recall
     FB_IOU = np.mean(iou_class)
     mRecall = np.mean(recall_class)
 
-    if is_master_proc():
-        if current_method in ["SOFS"]:
-            LOGGER.info(
-                'Train result at epoch [{}/{}]: data_time: {:.2f}, batch_time: {:.2f} loss: {:.4f}, main_loss: {:.4f}, FB_IOU/mRecall {:.4f}/{:.4f}.'.format(
-                    epoch, cfg.TRAIN_SETUPS.epochs,
-                    data_time.avg, batch_time.avg,
-                    loss_meter.avg, main_loss_meter.avg,
-                    FB_IOU, mRecall))
 
-        for i in range(2):
-            LOGGER.info('Class_{} Result: FB_IOU/Recall {:.4f}/{:.4f}.'.format(i, iou_class[i], recall_class[i]))
+    if current_method in ["SOFS"]:
+        LOGGER.info(
+            'Train result at epoch [{}/{}]: data_time: {:.2f}, batch_time: {:.2f} loss: {:.4f}, main_loss: {:.4f}, FB_IOU/mRecall {:.4f}/{:.4f}.'.format(
+                epoch, cfg.TRAIN_SETUPS.epochs,
+                data_time.avg, batch_time.avg,
+                loss_meter.avg, main_loss_meter.avg,
+                FB_IOU, mRecall))
+
+    for i in range(2):
+        LOGGER.info('Class_{} Result: FB_IOU/Recall {:.4f}/{:.4f}.'.format(i, iou_class[i], recall_class[i]))
+
+
 
     if validate_each_class:
         if cfg.DATASET.name in ["VISION_V1", "VISION_V1_ND"]:
@@ -145,49 +151,43 @@ def epoch_train_ss(train_loader, model, optimizer, epoch, cfg, validate_each_cla
         else:
             raise NotImplementedError
 
-        result_dict_gather = [None for _ in range(torch.distributed.get_world_size())]
-        torch.distributed.all_gather_object(result_dict_gather, result_dict)
 
-        if is_master_proc():
-            for each_dict in result_dict_gather:
-                for each_object, category_attribute_val in each_dict.items():
-                    for category_, attribute_val in category_attribute_val.items():
-                        if category_ not in result_dict_total[each_object].keys():
-                            result_dict_total[each_object][category_] = {
-                                "intersection": [],
-                                "union": [],
-                                "new_target": []
-                            }
+        ################################################################################
+        ############################ Modified for singe GPU ############################
+        
+        result_dict_total = result_dict
 
-                        for attribute_, val_ in attribute_val.items():
-                            result_dict_total[each_object][category_][attribute_].extend(val_)
+        class_iou_class = {}
+        class_miou = 0
+        FB_IOU_intersection = np.array([0., 0.])
+        FB_IOU_union = np.array([0., 0.])
 
-            class_iou_class = {}
-            class_miou = 0
-            FB_IOU_intersection = np.array([0., 0.])
-            FB_IOU_union = np.array([0., 0.])
+        class_miou, class_iou_class, FB_IOU = acquire_final_mIOU_FBIOU(
+            result_dict=result_dict_total,
+            class_iou_class=class_iou_class,
+            class_miou=class_miou,
+            FB_IOU_intersection=FB_IOU_intersection,
+            FB_IOU_union=FB_IOU_union
+        )
 
-            class_miou, class_iou_class, FB_IOU = acquire_final_mIOU_FBIOU(
-                result_dict=result_dict_total,
-                class_iou_class=class_iou_class,
-                class_miou=class_miou,
-                FB_IOU_intersection=FB_IOU_intersection,
-                FB_IOU_union=FB_IOU_union
-            )
+        LOGGER.info("current epoch is {}".format(epoch))
+        LOGGER.info('meanIoU---Val result: mIoU_final {:.4f}.'.format(class_miou))
 
-            if is_master_proc():
-                LOGGER.info("current epoch is {}".format(epoch))
-                LOGGER.info('meanIoU---Val result: mIoU_final {:.4f}.'.format(class_miou))
+        LOGGER.info('<<<<<<< Every Class Results <<<<<<<')
+        for i in class_iou_class.keys():
+            LOGGER.info('{} Foreground Result: iou_f {:.4f}.'.format(i, class_iou_class[i]["foreground_iou"]))
+            LOGGER.info('{} Background Result: iou_b {:.4f}.'.format(i, class_iou_class[i]["background_iou"]))
+        for i in range(2):
+            LOGGER.info('Class_{} Result: FB_IOU {:.4f}.'.format(i, FB_IOU[i]))
 
-                LOGGER.info('<<<<<<< Every Class Results <<<<<<<')
-                for i in class_iou_class.keys():
-                    LOGGER.info('{} Foreground Result: iou_f {:.4f}.'.format(i, class_iou_class[i]["foreground_iou"]))
-                    LOGGER.info('{} Background Result: iou_b {:.4f}.'.format(i, class_iou_class[i]["background_iou"]))
-                for i in range(2):
-                    LOGGER.info('Class_{} Result: FB_IOU {:.4f}.'.format(i, FB_IOU[i]))
+        LOGGER.info('FBIoU---Val result: FBIoU {:.4f}.'.format(np.mean(FB_IOU)))
+        LOGGER.info('<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<')
+        
+        ############################ Modified for singe GPU ############################
+        ################################################################################
 
-                LOGGER.info('FBIoU---Val result: FBIoU {:.4f}.'.format(np.mean(FB_IOU)))
-                LOGGER.info('<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<')
+
+
 
 
 @torch.no_grad()
@@ -236,6 +236,9 @@ def epoch_validate_ss(val_loader, model, epoch, cfg, rand_seed, train_validate=F
     test_num = 0
     for i, data in enumerate(val_loader):
 
+        # if i % 100 != 0:
+        #     continue
+        
         s_input = data["support_image"]
         s_mask = data["support_mask"]
         input = data["query_image"]
@@ -347,22 +350,12 @@ def epoch_validate_ss(val_loader, model, epoch, cfg, rand_seed, train_validate=F
     else:
         raise NotImplementedError
 
-    result_dict_gather = [None for _ in range(torch.distributed.get_world_size())]
-    torch.distributed.all_gather_object(result_dict_gather, result_dict)
 
-    # if is_master_proc():
-    for each_dict in result_dict_gather:
-        for each_object, category_attribute_val in each_dict.items():
-            for category_, attribute_val in category_attribute_val.items():
-                if category_ not in result_dict_total[each_object].keys():
-                    result_dict_total[each_object][category_] = {
-                        "intersection": [],
-                        "union": [],
-                        "new_target": []
-                    }
 
-                for attribute_, val_ in attribute_val.items():
-                    result_dict_total[each_object][category_][attribute_].extend(val_)
+    ################################################################################
+    ############################ Modified for singe GPU ############################
+
+    result_dict_total = result_dict
 
     class_iou_class = {}
     class_miou = 0
@@ -376,7 +369,11 @@ def epoch_validate_ss(val_loader, model, epoch, cfg, rand_seed, train_validate=F
         FB_IOU_intersection=FB_IOU_intersection,
         FB_IOU_union=FB_IOU_union
     )
-
+    
+    ############################ Modified for singe GPU ############################
+    ################################################################################
+        
+        
     LOGGER.info("current epoch is {}".format(epoch))
     LOGGER.info('meanIoU---Val result: mIoU_final {:.4f}.'.format(class_miou))
 
@@ -449,6 +446,10 @@ def epoch_validate_non_resize_ss(val_loader, model, epoch, cfg, rand_seed, mode=
     test_num = 0
 
     for i, data in enumerate(val_loader):
+
+        # if i % 100 != 0:
+        #     continue        
+        
         s_input = data["support_image"]
         s_mask = data["support_mask"]
         input = data["query_image"]
@@ -603,7 +604,7 @@ def epoch_validate_non_resize_ss(val_loader, model, epoch, cfg, rand_seed, mode=
                     )
                 except:
                     pass
-
+                
     val_time = time.time() - val_start
 
     if cfg.DATASET.name in ["VISION_V1", "VISION_V1_ND", "DS_Spectrum_DS", "DS_Spectrum_DS_ND"]:
@@ -613,51 +614,49 @@ def epoch_validate_non_resize_ss(val_loader, model, epoch, cfg, rand_seed, mode=
     else:
         raise NotImplementedError
 
-    result_dict_gather = [None for _ in range(torch.distributed.get_world_size())]
-    torch.distributed.all_gather_object(result_dict_gather, result_dict)
 
-    if is_master_proc():
-        total_num = 0
-        for each_dict in result_dict_gather:
-            for each_object, category_attribute_val in each_dict.items():
-                for category_, attribute_val in category_attribute_val.items():
-                    if category_ not in result_dict_total[each_object].keys():
-                        result_dict_total[each_object][category_] = {
-                            "intersection": [],
-                            "union": [],
-                            "new_target": []
-                        }
+    ################################################################################
+    ############################ Modified for singe GPU ############################
 
-                    for idx, (attribute_, val_) in enumerate(attribute_val.items()):
-                        if idx == 0:
-                            total_num += len(val_)
-                        result_dict_total[each_object][category_][attribute_].extend(val_)
+    result_dict_total = result_dict
 
-        LOGGER.info("total test samples are {}".format(total_num))
+    total_num = 0
+    for each_object, category_attribute_val in result_dict_total.items():
+        for category_, attribute_val in category_attribute_val.items():
+            for idx, (attribute_, val_) in enumerate(attribute_val.items()):
+                if idx == 0:
+                    total_num += len(val_)
 
-        class_iou_class = {}
-        class_miou = 0
-        FB_IOU_intersection = np.array([0., 0.])
-        FB_IOU_union = np.array([0., 0.])
+    LOGGER.info("total test samples are {}".format(total_num))
 
-        class_miou, class_iou_class, FB_IOU = acquire_final_mIOU_FBIOU(
-            result_dict=result_dict_total,
-            class_iou_class=class_iou_class,
-            class_miou=class_miou,
-            FB_IOU_intersection=FB_IOU_intersection,
-            FB_IOU_union=FB_IOU_union
-        )
+    class_iou_class = {}
+    class_miou = 0
+    FB_IOU_intersection = np.array([0., 0.])
+    FB_IOU_union = np.array([0., 0.])
 
-        # if is_master_proc():
-        LOGGER.info("current epoch is {}".format(epoch))
-        LOGGER.info('meanIoU---Val result: mIoU_final {:.4f}.'.format(class_miou))
+    class_miou, class_iou_class, FB_IOU = acquire_final_mIOU_FBIOU(
+        result_dict=result_dict_total,
+        class_iou_class=class_iou_class,
+        class_miou=class_miou,
+        FB_IOU_intersection=FB_IOU_intersection,
+        FB_IOU_union=FB_IOU_union
+    )
 
-        LOGGER.info('<<<<<<< Every Class Results <<<<<<<')
-        for i in class_iou_class.keys():
-            LOGGER.info('{} Foreground Result: iou_f {:.4f}.'.format(i, class_iou_class[i]["foreground_iou"]))
-            LOGGER.info('{} Background Result: iou_b {:.4f}.'.format(i, class_iou_class[i]["background_iou"]))
-        for i in range(2):
-            LOGGER.info('Class_{} Result: FB_IOU {:.4f}.'.format(i, FB_IOU[i]))
+    # if is_master_proc():
+    LOGGER.info("current epoch is {}".format(epoch))
+    LOGGER.info('meanIoU---Val result: mIoU_final {:.4f}.'.format(class_miou))
 
-        LOGGER.info('FBIoU---Val result: FBIoU {:.4f}.'.format(np.mean(FB_IOU)))
-        LOGGER.info('<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<')
+    LOGGER.info('<<<<<<< Every Class Results <<<<<<<')
+    for i in class_iou_class.keys():
+        LOGGER.info('{} Foreground Result: iou_f {:.4f}.'.format(i, class_iou_class[i]["foreground_iou"]))
+        LOGGER.info('{} Background Result: iou_b {:.4f}.'.format(i, class_iou_class[i]["background_iou"]))
+    for i in range(2):
+        LOGGER.info('Class_{} Result: FB_IOU {:.4f}.'.format(i, FB_IOU[i]))
+
+    LOGGER.info('FBIoU---Val result: FBIoU {:.4f}.'.format(np.mean(FB_IOU)))
+    LOGGER.info('<<<<<<<<<<<<<<<<< End Evaluation <<<<<<<<<<<<<<<<<')
+    
+    
+    ############################ Modified for singe GPU ############################
+    ################################################################################
+        
