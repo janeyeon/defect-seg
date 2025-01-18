@@ -42,9 +42,9 @@ def train(cfg):
     # setup logging
     # only for multiple GPUs
     # todo for a single GPU
-    if is_master_proc():
-        setup_logging(cfg)
-        LOGGER.info(pprint.pformat(cfg))
+    
+    setup_logging(cfg)
+    LOGGER.info(pprint.pformat(cfg))
 
     try:
         LOGGER.info("start main training!")
@@ -53,7 +53,7 @@ def train(cfg):
         LOGGER.info("load dataset!")
         # get train dataloader (include each category)
         train_datasets = get_datasets(cfg=cfg, mode='train')
-        # if is_master_proc():
+        
         if cfg.TRAIN_SETUPS.TEST_SETUPS.test_state:
             if cfg.TRAIN_SETUPS.TEST_SETUPS.val_state:
                 val_datasets = get_datasets(cfg=cfg, mode='val')
@@ -85,7 +85,6 @@ def train(cfg):
                     num_workers=cfg.TRAIN_SETUPS.num_workers, pin_memory=True)
 
             # 多卡测试
-            # if is_master_proc():
             if cfg.TRAIN_SETUPS.TEST_SETUPS.test_state:
                 if cfg.TRAIN_SETUPS.TEST_SETUPS.val_state:
                     val_loader_list = []
@@ -187,7 +186,6 @@ def train(cfg):
 
             # start training!
             for epoch in range(1, cfg.TRAIN_SETUPS.epochs + 1):
-
                 if cfg.NUM_GPUS > 1:
                     train_sampler.set_epoch(epoch)
 
@@ -212,7 +210,6 @@ def train(cfg):
                 else:
                     raise NotImplementedError
 
-                # if is_master_proc():
                 if cfg.TRAIN_SETUPS.TEST_SETUPS.test_state:
                     """
                                                     prediction
@@ -230,16 +227,21 @@ def train(cfg):
                     """
                     if epoch % cfg.TRAIN_SETUPS.TEST_SETUPS.epoch_test == 0:
                         for test_idx in range(len(cfg.DATASET.sub_datasets)):
+                            ################################################################################
+                            ############################ Modified for singe GPU ############################                            
                             if cfg.TRAIN_SETUPS.TEST_SETUPS.val_state:
-                                tmp_val_sampler = val_sampler_list[test_idx]
+                                if cfg.NUM_GPUS > 1:                                
+                                    tmp_val_sampler = val_sampler_list[test_idx]
+                                    tmp_val_sampler.set_epoch(cfg.RNG_SEED)
+                                    
                                 tmp_val_loader = val_loader_list[test_idx]
 
-                                tmp_val_sampler.set_epoch(cfg.RNG_SEED)
-
-                            tmp_test_sampler = test_sampler_list[test_idx]
+                            if cfg.NUM_GPUS > 1:                                
+                                tmp_test_sampler = test_sampler_list[test_idx]
+                                tmp_test_sampler.set_epoch(cfg.RNG_SEED)
                             tmp_test_loader = test_loader_list[test_idx]
-
-                            tmp_test_sampler.set_epoch(cfg.RNG_SEED)
+                            ############################ Modified for singe GPU ############################                            
+                            ################################################################################
 
                             if cfg.DATASET.name in ["VISION_V1", "VISION_V1_ND"]:
                                 if cfg.TRAIN.method in ["SOFS"]:
@@ -278,25 +280,25 @@ def train(cfg):
 
             # save model
             if cfg.TRAIN.save_model:
-                if is_master_proc():
-                    base_path = os.path.join(cfg.OUTPUT_DIR, "checkpoints")
+                base_path = os.path.join(cfg.OUTPUT_DIR, "checkpoints")
 
-                    save_name = "_".join(
-                        ["best", "method", cfg.TRAIN.method, cfg.DATASET.name,
-                         "split_" + str(cfg.DATASET.split), ".pth"])
-                    while os.path.isfile(os.path.join(base_path, save_name)):
-                        save_name = "new_" + save_name
-                    save_name = os.path.join(base_path, save_name)
+                save_name = "_".join(
+                    ["best", "method", cfg.TRAIN.method, cfg.DATASET.name,
+                        "split_" + str(cfg.DATASET.split), ".pth"])
+                while os.path.isfile(os.path.join(base_path, save_name)):
+                    save_name = "new_" + save_name
+                save_name = os.path.join(base_path, save_name)
 
-                    if cfg.NUM_GPUS > 1:
-                        model_module = model.module.cpu()
-                        if cfg.TRAIN.method == "SOFS_ada":
-                            torch.save(model_module.backbone.state_dict(), save_name)
-                        else:
-                            torch.save(model_module.state_dict(), save_name)
+                if cfg.NUM_GPUS > 1:
+                    model_module = model.module.cpu()
+                    if cfg.TRAIN.method == "SOFS_ada":
+                        torch.save(model_module.backbone.state_dict(), save_name)
                     else:
-                        torch.save(model.cpu().state_dict(), save_name)
-                    LOGGER.info("Model save in {}".format(save_name))
+                        torch.save(model_module.state_dict(), save_name)
+                else:
+                    torch.save(model.cpu().state_dict(), save_name)
+                LOGGER.info("Model save in {}".format(save_name))
+
 
         LOGGER.info("Method training phase complete!")
     except Exception as e:
