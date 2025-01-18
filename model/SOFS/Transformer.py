@@ -15,12 +15,12 @@ import torch.nn.functional as F
 
 class MixFFN(BaseModule):
     def __init__(self,
-                 embed_dims,
-                 feedforward_channels,
-                 act_cfg=dict(type='GELU'),
-                 ffn_drop=0.,
-                 dropout_layer=None,
-                 init_cfg=None):
+                embed_dims,
+                feedforward_channels,
+                act_cfg=dict(type='GELU'),
+                ffn_drop=0.,
+                dropout_layer=None,
+                init_cfg=None):
         super(MixFFN, self).__init__(init_cfg)
 
         self.embed_dims = embed_dims
@@ -67,16 +67,16 @@ class MixFFN(BaseModule):
 
 class EfficientMultiheadAttention(MultiheadAttention):
     def __init__(self,
-                 embed_dims,
-                 num_heads,
-                 attn_drop=0.,
-                 proj_drop=0.,
-                 dropout_layer=None,
-                 init_cfg=None,
-                 batch_first=True,
-                 qkv_bias=False,
-                 norm_cfg=dict(type='LN'),
-                 sr_ratio=1):
+                embed_dims,
+                num_heads,
+                attn_drop=0.,
+                proj_drop=0.,
+                dropout_layer=None,
+                init_cfg=None,
+                batch_first=True,
+                qkv_bias=False,
+                norm_cfg=dict(type='LN'),
+                sr_ratio=1):
         super().__init__(
             embed_dims,
             num_heads,
@@ -121,17 +121,17 @@ class EfficientMultiheadAttention(MultiheadAttention):
 
 class TransformerEncoderLayer(BaseModule):
     def __init__(self,
-                 embed_dims,
-                 num_heads,
-                 feedforward_channels,
-                 drop_rate=0.,
-                 attn_drop_rate=0.,
-                 drop_path_rate=0.,
-                 qkv_bias=True,
-                 act_cfg=dict(type='GELU'),
-                 norm_cfg=dict(type='LN'),
-                 batch_first=True,
-                 sr_ratio=1):
+                embed_dims,
+                num_heads,
+                feedforward_channels,
+                drop_rate=0.,
+                attn_drop_rate=0.,
+                drop_path_rate=0.,
+                qkv_bias=True,
+                act_cfg=dict(type='GELU'),
+                norm_cfg=dict(type='LN'),
+                batch_first=True,
+                sr_ratio=1):
         super(TransformerEncoderLayer, self).__init__()
 
         # The ret[0] of build_norm_layer is norm name.
@@ -170,19 +170,19 @@ class TransformerEncoderLayer(BaseModule):
 
 class MixVisionTransformer(BaseModule):
     def __init__(self,
-                 shot=1,
-                 temperature=0.1,
-                 num_stages=2,
-                 match_dims=64,
-                 match_nums_heads=2,
-                 mlp_ratio=4,
-                 drop_rate=0.1,
-                 attn_drop_rate=0.,
-                 qkv_bias=False,
-                 meta_cls=False,
-                 act_cfg=dict(type='GELU'),
-                 norm_cfg=dict(type='LN', eps=1e-6),
-                 init_cfg=None):
+                shot=1,
+                temperature=0.1,
+                num_stages=2,
+                match_dims=64,
+                match_nums_heads=2,
+                mlp_ratio=4,
+                drop_rate=0.1,
+                attn_drop_rate=0.,
+                qkv_bias=False,
+                meta_cls=False,
+                act_cfg=dict(type='GELU'),
+                norm_cfg=dict(type='LN', eps=1e-6),
+                init_cfg=None):
         super(MixVisionTransformer, self).__init__(init_cfg=init_cfg)
 
         self.shot = shot

@@ -24,7 +24,6 @@ class Feature_Recorrect_Module(nn.Module):
         self.shot = shot
         self.prior_layer_pointer = prior_layer_pointer
         self.patch_size = cfg.TRAIN.SOFS.vit_patch_size
-
         self.cfg = cfg
 
         self.down_query = nn.Sequential(
@@ -56,7 +55,7 @@ class Feature_Recorrect_Module(nn.Module):
 
         self.query_merge_semantic = nn.Sequential(
             nn.Conv2d(reduce_dim * 2 + num_similarity_channels, transformer_embed_dim, kernel_size=1, padding=0,
-                      bias=False),
+            bias=False),
             nn.ReLU(inplace=True),
         )
 
@@ -123,41 +122,35 @@ class Feature_Recorrect_Module(nn.Module):
         else:
             query_semantic_similarity = semantic_similarity
             
-            
-        
 
         # follow HDMNet 10*
-        tmp_query_feat_semantic = self.query_merge_semantic(torch.cat([tmp_query_feat,
-                                                                       tmp_supp_feat_bin,
-                                                                       10 * query_semantic_similarity], dim=1))
+        tmp_query_feat_semantic = self.query_merge_semantic(torch.cat([tmp_query_feat, tmp_supp_feat_bin, 10 * query_semantic_similarity], dim=1))
 
         _, _, supp_h, supp_w = tmp_supp_feat_merge.shape
         if conv_vit_down_sampling:
             down_sample_mask = conv_down_sample_vit(mask, patch_size=self.patch_size)
         else:
             down_sample_mask = F.interpolate(mask,
-                                             size=(supp_h, supp_w),
-                                             mode="bilinear",
-                                             align_corners=False)
+                                            size=(supp_h, supp_w),
+                                            mode="bilinear",
+                                            align_corners=False)
         tmp_down_sample_mask = rearrange(down_sample_mask, "(b n) 1 h w -> b n 1 h w", n=self.shot)
 
+        #! Non-learnable feature fusion
         # b, d, h, w and b, d
         if self.cfg.TRAIN.SOFS.meta_cls:
             final_out_semantic, s_x_prototype = self.query_semantic_transformer(tmp_query_feat_semantic,
-                                                                                tmp_supp_feat_merge,
-                                                                                tmp_down_sample_mask)
+            tmp_supp_feat_merge,
+            tmp_down_sample_mask)
         else:
             final_out_semantic = self.query_semantic_transformer(tmp_query_feat_semantic,
-                                                                 tmp_supp_feat_merge,
-                                                                 tmp_down_sample_mask)
+            tmp_supp_feat_merge,
+            tmp_down_sample_mask)
 
         bs_q, q_d, q_h, q_w = final_out_semantic.shape
 
         if self.cfg.TRAIN.SOFS.meta_cls:
-            final_out_semantic = (s_x_prototype.unsqueeze(1) @ final_out_semantic.view(bs_q, q_d, q_h * q_w)).view(bs_q,
-                                                                                                                   1,
-                                                                                                                   q_h,
-                                                                                                                   q_w)
+            final_out_semantic = (s_x_prototype.unsqueeze(1) @ final_out_semantic.view(bs_q, q_d, q_h * q_w)).view(bs_q, 1, q_h, q_w)
         else:
             final_out_semantic = self.cls_semantic(final_out_semantic)
 

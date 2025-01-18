@@ -165,11 +165,15 @@ class SOFS(nn.Module):
 
         with torch.no_grad():
             query_multi_scale_features = self.encode_feature(x)
+            #  <- 여기에서 dino로 넘겨줌 
+            # query_multi_scale_features(List[Tensor]): [4, 1370, 768] x 6 
+            # encode feature에 사용한 모델은 DinoVisionTransformer 
+            #! 왜 여기서 multi-scale이라고 하지? 여러 layer에서 뽑으니까 
             query_features_list = []
 
             if self.cfg.TRAIN.backbone in ['dinov2_vitb14', "dinov2_vitl14"]:
                 query_features = self.feature_processing_vit(query_multi_scale_features)
-                
+                # <- 이건 왜 해놓고 안씀?? 위에서 이미 써서 그런가? 
                 
             elif self.cfg.TRAIN.backbone in ["resnet50", "wideresnet50", 'antialiased_wide_resnet50_2']:
                 query_features = self.feature_processing_cnn(query_multi_scale_features)
@@ -178,6 +182,7 @@ class SOFS(nn.Module):
                 query_features_list.append(eval('query_feat_' + str(layer_pointer)))
 
             #   Support Feature
+            #? support image의 mask를 뽑아오는 과정 
             mask = rearrange(s_y, "b n 1 h w -> (b n) 1 h w")
             mask = (mask == 1.).float()
             s_x = rearrange(s_x, "b n c h w -> (b n) c h w")
@@ -192,15 +197,16 @@ class SOFS(nn.Module):
                 support_features_list.append(eval('supp_feat_' + str(layer_pointer)))
 
             # weighted GAP for every layer
+            #?  support_features_list(List[Tensor]): [16, 768, 37, 37] x 6
             supp_feat_bin_list = []
             for each_layer_supp_feat in support_features_list:
-                if conv_vit_down_sampling:
+                if conv_vit_down_sampling: # True
                     tmp_mask = conv_down_sample_vit(mask, patch_size=patch_size)
                 else:
                     tmp_mask = F.interpolate(
                         mask,
                         size=(each_layer_supp_feat.size(2),
-                              each_layer_supp_feat.size(3)),
+                            each_layer_supp_feat.size(3)),
                         mode="bilinear",
                         align_corners=False
                     )
@@ -208,33 +214,32 @@ class SOFS(nn.Module):
                     each_layer_supp_feat,
                     tmp_mask
                 )
-                supp_feat_bin = supp_feat_bin.repeat(1, 1, each_layer_supp_feat.shape[-2],
-                                                     each_layer_supp_feat.shape[-1])
+                supp_feat_bin = supp_feat_bin.repeat(1, 1, each_layer_supp_feat.shape[-2], each_layer_supp_feat.shape[-1])
                 supp_feat_bin_list.append(supp_feat_bin)
 
             # semantic similarity
+            # self.shot = 4 
             if self.shot == 1:
                 similarity2 = []
                 for layer_pointer in self.prior_layer_pointer:
-                    similarity2.append(get_similarity(eval('query_feat_' + str(layer_pointer)),
-                                                      eval('supp_feat_' + str(layer_pointer)),
-                                                      mask,
-                                                      patch_size=patch_size,
-                                                      conv_vit_down_sampling=conv_vit_down_sampling))  # b c h w, (bn) c h w, (bn) 1 h w --> b 1 h w
+                    similarity2.append(get_similarity(eval('query_feat_' + str(layer_pointer)), eval('supp_feat_' + str(layer_pointer)),
+                                                    mask,
+                                                    patch_size=patch_size,
+                                                    conv_vit_down_sampling=conv_vit_down_sampling))  # b c h w, (bn) c h w, (bn) 1 h w --> b 1 h w
                 semantic_similarity = torch.concat(similarity2, dim=1)
             else:
                 mask = rearrange(mask, "(b n) c h w -> b n c h w", n=self.shot)
                 layer_similarity = []
                 for idx, layer_pointer in enumerate(self.prior_layer_pointer):
                     tmp_supp_feat = rearrange(eval('supp_feat_' + str(layer_pointer)), "(b n) c h w -> b n c h w",
-                                              n=self.shot)
+                                            n=self.shot)
                     similarity2 = []
                     for i in range(self.shot):
                         similarity2.append(get_similarity(eval('query_feat_' + str(layer_pointer)),
-                                                          tmp_supp_feat[:, i, ...],
-                                                          mask=mask[:, i, ...],
-                                                          patch_size=patch_size,
-                                                          conv_vit_down_sampling=conv_vit_down_sampling))
+                                                        tmp_supp_feat[:, i, ...],
+                                                        mask=mask[:, i, ...],
+                                                        patch_size=patch_size,
+                                                        conv_vit_down_sampling=conv_vit_down_sampling))
 
                     similarity2 = torch.stack(similarity2, dim=1).mean(1)
                     layer_similarity.append(similarity2)
@@ -270,6 +275,22 @@ class SOFS(nn.Module):
         return final_out, mask_weight, each_normal_similarity
 
     def forward(self, x, s_x, s_y, y=None):
+        """_summary_
+        Args:
+            x (Tensor): torch.Size([4, 3, 518, 518])
+                이게 query image 이지 않을까? 
+                [batch, channel, height, width] 인 것 같음 
+            s_x (Tensor): torch.Size([4, 2, 4, 3, 518, 518])
+                이게 4개의 support image 인 것 같음
+                [batch, shot 갯수, channel, height, width] 인 것 같음 
+            s_y (Tensor): torch.Size([4, 4, 1, 518, 518])
+                이게 4개의 support mask 인 것 같음
+                [batch, index-mask image 갯수, 1, height, width] 인 것 같음
+            y (Tensor, optional): torch.Size([4, 1, 518, 518]). Defaults to None.
+                이건 query image의 mask 인듯함, 있을때도 있고 없을 때도 있는듯 
+        Returns:
+            final_out (Tensor): _description_
+        """
         x_size = x.size()
         bs_q, _, img_ori_h, img_ori_w = x_size
         patch_size = self.cfg.TRAIN.SOFS.vit_patch_size
@@ -298,8 +319,7 @@ class SOFS(nn.Module):
             )
 
             if self.cfg.TRAIN.SOFS.meta_cls:
-                final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear',
-                                          align_corners=False).squeeze(1)
+                final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
                 final_out_prob = torch.sigmoid(final_out).contiguous()
             else:
                 final_out = F.interpolate(final_out, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False)
@@ -309,12 +329,10 @@ class SOFS(nn.Module):
             return final_out.max(1)[1], main_loss
         else:
             mask_weight_ = mask_weight.unsqueeze(1).unsqueeze(1)
-            normal_out = F.interpolate(each_normal_similarity, size=(img_ori_h, img_ori_w), mode='bilinear',
-                                       align_corners=False).squeeze(1)
+            normal_out = F.interpolate(each_normal_similarity, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
             # each_normal_similarity_
             if self.cfg.TRAIN.SOFS.meta_cls:
-                final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear',
-                                          align_corners=False).squeeze(1)
+                final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
                 final_out_prob = torch.sigmoid(final_out).contiguous()
             else:
                 final_out = F.interpolate(final_out, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False)

@@ -7,11 +7,11 @@ import torch.nn.functional as F
 class MaskMultiHeadAttention(nn.Module):
 
     def __init__(self,
-                 in_features,
-                 head_num,
-                 bias=True,
-                 activation=F.relu
-                 ):
+                in_features,
+                head_num,
+                bias=True,
+                activation=F.relu
+                ):
         super(MaskMultiHeadAttention, self).__init__()
         if in_features % head_num != 0:
             raise ValueError('`in_features`({}) should be divisible by `head_num`({})'.format(in_features, head_num))
