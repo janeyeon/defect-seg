@@ -11,6 +11,9 @@ from model.SOFS.utils import Weighted_GAP, get_similarity, get_normal_similarity
 
 from .lora import LoRALinearLayer, LoRACompatibleLinear
 
+#! Add new loss 
+from model.SOFS.utils import ssim_intersect_bbox_batch
+
 
 class SOFS(nn.Module):
     def __init__(self, cfg):
@@ -214,6 +217,8 @@ class SOFS(nn.Module):
                     each_layer_supp_feat,
                     tmp_mask
                 )
+                # temp_mask: [16, 1, 37, 37]
+                # each_layer_supp_feat : [16, 768, 37, 37]
                 supp_feat_bin = supp_feat_bin.repeat(1, 1, each_layer_supp_feat.shape[-2], each_layer_supp_feat.shape[-1])
                 supp_feat_bin_list.append(supp_feat_bin)
 
@@ -272,7 +277,19 @@ class SOFS(nn.Module):
             conv_vit_down_sampling=conv_vit_down_sampling
         )
 
-        return final_out, mask_weight, each_normal_similarity
+        return final_out, mask_weight, each_normal_similarity, query_multi_scale_features, support_multi_scale_features, mask
+    
+    def plot_image(self, input):
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        # Create a 2D array
+        data = input
+        # Display the array as an image
+        plt.imshow(data.detach().cpu().numpy(), cmap='gray')
+        plt.savefig("./output_image.png")
+        # plt.colorbar()
+        # plt.show()
 
     def forward(self, x, s_x, s_y, y=None):
         """_summary_
@@ -280,7 +297,7 @@ class SOFS(nn.Module):
             x (Tensor): torch.Size([4, 3, 518, 518])
                 이게 query image 이지 않을까? 
                 [batch, channel, height, width] 인 것 같음 
-            s_x (Tensor): torch.Size([4, 2, 4, 3, 518, 518])
+            s_x (Tensor): torch.Size([4, 4, 3, 518, 518])
                 이게 4개의 support image 인 것 같음
                 [batch, shot 갯수, channel, height, width] 인 것 같음 
             s_y (Tensor): torch.Size([4, 4, 1, 518, 518])
@@ -295,7 +312,7 @@ class SOFS(nn.Module):
         bs_q, _, img_ori_h, img_ori_w = x_size
         patch_size = self.cfg.TRAIN.SOFS.vit_patch_size
         conv_vit_down_sampling = self.cfg.TRAIN.SOFS.conv_vit_down_sampling
-        final_out, mask_weight, each_normal_similarity = self.generate_query_label(x, s_x, s_y)
+        final_out, mask_weight, each_normal_similarity, query_multi_scale_features, support_multi_scale_features, mask = self.generate_query_label(x, s_x, s_y)
 
         if self.training:
             _h, _w = final_out.shape[-2:]
@@ -317,6 +334,30 @@ class SOFS(nn.Module):
                 ce_weight=self.ce_weight,
                 smooth_r=self.cfg.TRAIN.SOFS.smooth_r
             )
+            
+            # 일단 적당한 dice loss의 크기
+            # tensor(0.9922, device='cuda:0', grad_fn=<AddBackward0>)
+            # breakpoint()
+            # chamfer_and_ssim_loss
+            # y_m_squeeze : [4, 37, 37]
+            # final_out_prob.shape : [4, 37, 37]
+            # support_features_list : [4, 768, 37, 37] x 6 
+            # query_features_list : [4, 768, 37, 37] x 6 
+            # x: torch.Size([4, 3, 518, 518])
+            # y: torch.Size([4, 4, 3, 518, 518]) -> 이 4개의 shot중에서 뭐가 더 나은 이미지일까? 확인해봐야함
+            _, _, x_h, x_w = x.shape
+            query_mask_reshaped = F.interpolate(final_out_prob.unsqueeze(1), size=(x_h, x_w), mode='bilinear', align_corners=False)
+            # query_mask_reshaped : [4, 1,  518, 518]
+            
+            support_index = 0
+            loss_weight = 0.5
+            query_mask = query_mask_reshaped > 0.5
+            support_mask = s_y[:, support_index, ...] > 0.5
+            
+            ssim_loss = ssim_intersect_bbox_batch(x, s_x[:, support_index, ...], query_mask, support_mask)
+            ssim_loss = 1 - ssim_loss
+            
+            main_loss += ssim_loss * loss_weight
 
             if self.cfg.TRAIN.SOFS.meta_cls:
                 final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
