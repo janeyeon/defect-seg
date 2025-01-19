@@ -25,6 +25,7 @@ class MaskMultiHeadAttention(nn.Module):
         self.linear_o = nn.Linear(in_features, in_features, bias)
 
     def forward(self, q, k, v, mask=None, cross=False):
+        
         q, k, v = self.linear_q(q), self.linear_k(k), self.linear_v(v)
         q = self._reshape_to_batches(q)  # (b * head) l c
         k = self._reshape_to_batches(k)

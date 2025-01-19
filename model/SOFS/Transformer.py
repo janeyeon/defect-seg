@@ -229,7 +229,32 @@ class MixVisionTransformer(BaseModule):
                         m, mean=0, std=math.sqrt(2.0 / fan_out), bias=0)
         else:
             super(MixVisionTransformer, self).init_weights()
+    def gaussian_kernel(self, kernel_size: int, sigma: float) -> torch.Tensor:
+        """
+        Generate a 2D Gaussian kernel.
+        """
+        x = torch.arange(kernel_size) - (kernel_size - 1) / 2
+        y = torch.arange(kernel_size) - (kernel_size - 1) / 2
+        xx, yy = torch.meshgrid(x, y, indexing='ij')
+        kernel = torch.exp(-(xx**2 + yy**2) / (2 * sigma**2))
+        kernel = kernel / kernel.sum()
+        return kernel
 
+    def apply_gaussian_blur(self, tensor: torch.Tensor, kernel_size: int, sigma: float) -> torch.Tensor:
+        """
+        Apply Gaussian blur to the last two dimensions (h, w) of the input tensor.
+        """
+        # Generate the Gaussian kernel
+        kernel = self.gaussian_kernel(kernel_size, sigma).unsqueeze(0).unsqueeze(0)  # Shape: [1, 1, kernel_size, kernel_size]
+        kernel = kernel.to(tensor.device)
+
+        # Apply the Gaussian blur using conv2d
+        n, c, h, w = tensor.size()
+        tensor = tensor.view(-1, 1, h, w)  # Reshape for conv2d: [n*c, 1, h, w]
+        blurred_tensor = F.conv2d(tensor, kernel, padding=kernel_size // 2)  # Keep the size same
+        blurred_tensor = blurred_tensor.view(n, c, h, w)  # Reshape back to original
+        return blurred_tensor
+    
     def forward(self, q_x, s_x, mask):
         """
 
@@ -244,13 +269,30 @@ class MixVisionTransformer(BaseModule):
 
         tmp_mask = mask.reshape(bs_s, 1, h, w)
         mask = mask.reshape(bs, self.shot, 1, -1).permute(0, 2, 1, 3).reshape(bs, 1, -1)
+        
+        #! Add gaussian blur
+        kernel_size = 3
+        sigma = 0.5
+        blurred_mask = self.apply_gaussian_blur(tmp_mask, kernel_size, sigma)
+        blurred_mask = blurred_mask.reshape(bs, self.shot, 1, -1).permute(0, 2, 1, 3).reshape(bs, 1, -1)
+        
+        
+        # breakpoint()
+        #  mask :torch.Size([4, 1, 5476])
+        # tmp_mask: [16, 1, 37, 37]
+        # s_x.shape [16, 256, 37, 37]
+        #  q_x.shape [4, 256, 37, 37]
 
         # b hw d
         q_x = q_x.reshape(bs, d, -1).permute(0, 2, 1)
 
         s_x = s_x.reshape(bs_s, d, -1).permute(0, 2, 1)
         for i in range(self.num_stages):
+            #! 여기에 mask를 넣어주면 됨 
+            # 근데 support maks를 넣었을때만 해야함 
+            # add gaussian blur 
             q_x = self.sa_layers[i](q_x, hw_shape=hw_shape)
+            # s_x = self.sa_layers[i](s_x, hw_shape=hw_shape, mask=mask)
             s_x = self.sa_layers[i](s_x, hw_shape=hw_shape)
 
         s_x = s_x.reshape(bs_s, h * w, d).permute(0, 2, 1).reshape(bs_s, d, h, w)

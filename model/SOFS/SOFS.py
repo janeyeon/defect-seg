@@ -335,6 +335,7 @@ class SOFS(nn.Module):
                 smooth_r=self.cfg.TRAIN.SOFS.smooth_r
             )
             
+            #! Add ssim loss
             # 일단 적당한 dice loss의 크기
             # tensor(0.9922, device='cuda:0', grad_fn=<AddBackward0>)
             # breakpoint()
@@ -354,8 +355,10 @@ class SOFS(nn.Module):
             query_mask = query_mask_reshaped > 0.5
             support_mask = s_y[:, support_index, ...] > 0.5
             
+            # ssim_loss = ssim_intersect_bbox_batch(x, s_x[:, support_index, ...], query_mask, support_mask)
+            # ssim_loss = 1 - ssim_loss
             ssim_loss = ssim_intersect_bbox_batch(x, s_x[:, support_index, ...], query_mask, support_mask)
-            ssim_loss = 1 - ssim_loss
+            # ssim_loss = 1 - ssim_loss
             
             main_loss += ssim_loss * loss_weight
 

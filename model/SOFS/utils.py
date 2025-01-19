@@ -469,6 +469,7 @@ def ssim_single(
     - 여러 채널이라도 일단 '한꺼번에' 처리(= 'C'축을 batch라고 보고, groups=1).
     - 크기가 다르면 SSIM=0.
     """
+    sigma = 3.0
     device = img1.device
     dtype = img1.dtype
 
@@ -584,22 +585,3 @@ def ssim_intersect_bbox_batch(
     # ----------- batch 평균 -----------
     ssim_mean = torch.stack(ssim_vals).mean()
     return ssim_mean
-
-########################################
-# 사용 예시
-########################################
-if __name__ == "__main__":
-    B, C, H, W = 4, 1, 128, 128
-    x   = torch.zeros(B, C, H, W)
-    y   = torch.zeros(B, 1, H, W)
-    s_x = torch.zeros(B, C, H, W)
-    s_y = torch.zeros(B, 1, H, W)
-
-    # 예) 첫 배치에 서로 다른 위치에 결함 (좀 밖으로도 넘어가게)
-    x[0, 0, 20:50, 110:130] = 0.8
-    y[0, 0, 20:50, 110:130] = 1.0
-    s_x[0, 0, 10:40, 120:140] = 0.8   # 일부 140까지 -> clamp 후 127~128
-    s_y[0, 0, 10:40, 120:140] = 1.0
-
-    val = ssim_intersect_bbox_batch(x, y, s_x, s_y)
-    print("Batch mean SSIM:", val.item())
