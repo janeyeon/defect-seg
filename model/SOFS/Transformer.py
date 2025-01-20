@@ -272,12 +272,11 @@ class MixVisionTransformer(BaseModule):
         
         #! Add gaussian blur
         kernel_size = 3
-        sigma = 0.5
+        sigma = 1.5
         blurred_mask = self.apply_gaussian_blur(tmp_mask, kernel_size, sigma)
         blurred_mask = blurred_mask.reshape(bs, self.shot, 1, -1).permute(0, 2, 1, 3).reshape(bs, 1, -1)
         
         
-        # breakpoint()
         #  mask :torch.Size([4, 1, 5476])
         # tmp_mask: [16, 1, 37, 37]
         # s_x.shape [16, 256, 37, 37]
@@ -292,8 +291,8 @@ class MixVisionTransformer(BaseModule):
             # 근데 support maks를 넣었을때만 해야함 
             # add gaussian blur 
             q_x = self.sa_layers[i](q_x, hw_shape=hw_shape)
-            # s_x = self.sa_layers[i](s_x, hw_shape=hw_shape, mask=mask)
-            s_x = self.sa_layers[i](s_x, hw_shape=hw_shape)
+            s_x = self.sa_layers[i](s_x, hw_shape=hw_shape, mask=mask)
+            # s_x = self.sa_layers[i](s_x, hw_shape=hw_shape)
 
         s_x = s_x.reshape(bs_s, h * w, d).permute(0, 2, 1).reshape(bs_s, d, h, w)
 

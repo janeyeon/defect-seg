@@ -579,8 +579,8 @@ def ssim_intersect_bbox_batch(
             continue
 
         # ----------- SSIM -----------
-        val = ssim_single(cropA, cropB)
-        ssim_vals.append(val)
+        # val = ssim_single(cropA, cropB)
+        # ssim_vals.append(val)
 
     # ----------- batch 평균 -----------
     ssim_mean = torch.stack(ssim_vals).mean()

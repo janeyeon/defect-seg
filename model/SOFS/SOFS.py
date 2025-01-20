@@ -50,7 +50,7 @@ class SOFS(nn.Module):
                 network_layer[-1].register_forward_hook(forward_hook)
             else:
                 network_layer.register_forward_hook(forward_hook)
-
+        breakpoint()
         self.backbone = backbone
         self.shot = shot
         self.prior_layer_pointer = prior_layer_pointer
@@ -89,7 +89,7 @@ class SOFS(nn.Module):
     def encode_feature(self, x):
         self.outputs.clear()
         with torch.no_grad():
-            _ = self.backbone(x)
+            _ = self.backbone(x) # DinoVisionTransformer
             
         multi_scale_features = [self.outputs[key] for key in self.prior_layer_pointer]
         return multi_scale_features
@@ -168,7 +168,7 @@ class SOFS(nn.Module):
 
         with torch.no_grad():
             query_multi_scale_features = self.encode_feature(x)
-            #  <- 여기에서 dino로 넘겨줌 
+            #  <- 여기에서 dino로 넘겨줌 : 
             # query_multi_scale_features(List[Tensor]): [4, 1370, 768] x 6 
             # encode feature에 사용한 모델은 DinoVisionTransformer 
             #! 왜 여기서 multi-scale이라고 하지? 여러 layer에서 뽑으니까 
@@ -177,7 +177,6 @@ class SOFS(nn.Module):
             if self.cfg.TRAIN.backbone in ['dinov2_vitb14', "dinov2_vitl14"]:
                 query_features = self.feature_processing_vit(query_multi_scale_features)
                 # <- 이건 왜 해놓고 안씀?? 위에서 이미 써서 그런가? 
-                
             elif self.cfg.TRAIN.backbone in ["resnet50", "wideresnet50", 'antialiased_wide_resnet50_2']:
                 query_features = self.feature_processing_cnn(query_multi_scale_features)
             for idx, layer_pointer in enumerate(self.prior_layer_pointer):
@@ -346,21 +345,24 @@ class SOFS(nn.Module):
             # query_features_list : [4, 768, 37, 37] x 6 
             # x: torch.Size([4, 3, 518, 518])
             # y: torch.Size([4, 4, 3, 518, 518]) -> 이 4개의 shot중에서 뭐가 더 나은 이미지일까? 확인해봐야함
-            _, _, x_h, x_w = x.shape
-            query_mask_reshaped = F.interpolate(final_out_prob.unsqueeze(1), size=(x_h, x_w), mode='bilinear', align_corners=False)
-            # query_mask_reshaped : [4, 1,  518, 518]
+            # _, _, x_h, x_w = x.shape
+            # query_mask_reshaped = F.interpolate(final_out_prob.unsqueeze(1), size=(x_h, x_w), mode='bilinear', align_corners=False)
+            # # query_mask_reshaped : [4, 1,  518, 518]
             
-            support_index = 0
-            loss_weight = 0.5
-            query_mask = query_mask_reshaped > 0.5
-            support_mask = s_y[:, support_index, ...] > 0.5
+            # support_index = 0
+            # loss_weight = 0.5
+            # query_mask = query_mask_reshaped > 0.5
+            # support_mask = s_y[:, support_index, ...] > 0.5
             
-            # ssim_loss = ssim_intersect_bbox_batch(x, s_x[:, support_index, ...], query_mask, support_mask)
-            # ssim_loss = 1 - ssim_loss
-            ssim_loss = ssim_intersect_bbox_batch(x, s_x[:, support_index, ...], query_mask, support_mask)
-            # ssim_loss = 1 - ssim_loss
+            # # query_input = x 
+            # # support_input = s_x[:, support_index, ...]
+            # query_input = torch.stack(query_multi_scale_features, dim=0) # [6, 4, 1370, 768]
+            # support_input = torch.stack(support_multi_scale_features, dim=0) # [6, 16, 1370, 768]
             
-            main_loss += ssim_loss * loss_weight
+            # ssim_loss = ssim_intersect_bbox_batch(query_input, support_input, query_mask, support_mask)
+            # # ssim_loss = 1 - ssim_loss
+            
+            # main_loss += ssim_loss * loss_weight
 
             if self.cfg.TRAIN.SOFS.meta_cls:
                 final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
