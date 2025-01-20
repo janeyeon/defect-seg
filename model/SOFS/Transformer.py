@@ -271,7 +271,9 @@ class MixVisionTransformer(BaseModule):
         mask = mask.reshape(bs, self.shot, 1, -1).permute(0, 2, 1, 3).reshape(bs, 1, -1)
         
         #! Add gaussian blur
-        kernel_size = 3
+        # kernel_size = 3
+        # sigma = 1.5
+        kernel_size = 5
         sigma = 1.5
         blurred_mask = self.apply_gaussian_blur(tmp_mask, kernel_size, sigma)
         blurred_mask = blurred_mask.reshape(bs, self.shot, 1, -1).permute(0, 2, 1, 3).reshape(bs, 1, -1)

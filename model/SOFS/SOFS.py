@@ -50,7 +50,6 @@ class SOFS(nn.Module):
                 network_layer[-1].register_forward_hook(forward_hook)
             else:
                 network_layer.register_forward_hook(forward_hook)
-        breakpoint()
         self.backbone = backbone
         self.shot = shot
         self.prior_layer_pointer = prior_layer_pointer
