@@ -225,10 +225,13 @@ class SOFS(nn.Module):
             if self.shot == 1:
                 similarity2 = []
                 for layer_pointer in self.prior_layer_pointer:
-                    similarity2.append(get_similarity(eval('query_feat_' + str(layer_pointer)), eval('supp_feat_' + str(layer_pointer)),
+                    sim = get_similarity(eval('query_feat_' + str(layer_pointer)), eval('supp_feat_' + str(layer_pointer)),
                                                     mask,
                                                     patch_size=patch_size,
-                                                    conv_vit_down_sampling=conv_vit_down_sampling))  # b c h w, (bn) c h w, (bn) 1 h w --> b 1 h w
+                                                    conv_vit_down_sampling=conv_vit_down_sampling)
+                    
+                    
+                    similarity2.append(sim)  # b c h w, (bn) c h w, (bn) 1 h w --> b 1 h w
                 semantic_similarity = torch.concat(similarity2, dim=1)
             else:
                 mask = rearrange(mask, "(b n) c h w -> b n c h w", n=self.shot)
@@ -238,11 +241,12 @@ class SOFS(nn.Module):
                                             n=self.shot)
                     similarity2 = []
                     for i in range(self.shot):
-                        similarity2.append(get_similarity(eval('query_feat_' + str(layer_pointer)),
+                        sim = get_similarity(eval('query_feat_' + str(layer_pointer)),
                                                         tmp_supp_feat[:, i, ...],
                                                         mask=mask[:, i, ...],
                                                         patch_size=patch_size,
-                                                        conv_vit_down_sampling=conv_vit_down_sampling))
+                                                        conv_vit_down_sampling=conv_vit_down_sampling)
+                        similarity2.append(sim)
 
                     similarity2 = torch.stack(similarity2, dim=1).mean(1)
                     layer_similarity.append(similarity2)
@@ -258,7 +262,19 @@ class SOFS(nn.Module):
                 abnormal_dis = get_normal_similarity(tmp_q, tmp_s, mask, self.shot, patch_size=patch_size, conv_vit_down_sampling=conv_vit_down_sampling)
                 layer_out.append(abnormal_dis)
             normal_similarity = torch.concat(layer_out, dim=1)
+            
+            # normal_similarity : ([4, 6, 37, 37])
+            # semantic_similarity : ([4, 6, 37, 37])
+            
+            # normal_similarity = self.normalize_mask(normal_similarity)
+            # semantic_similarity = self.normalize_mask(semantic_similarity) 
+
+
+            
             each_normal_similarity = (normal_similarity.max(1)[0]).unsqueeze(1)
+            
+          
+            
 
             mask = rearrange(mask, "(b n) c h w -> b n c h w", n=self.shot)
             mask_weight = mask.reshape(bs_q, -1).sum(1)
@@ -275,7 +291,18 @@ class SOFS(nn.Module):
             conv_vit_down_sampling=conv_vit_down_sampling
         )
 
-        return final_out, mask_weight, each_normal_similarity, query_multi_scale_features, support_multi_scale_features, mask
+        return final_out, mask_weight, each_normal_similarity, query_multi_scale_features, support_multi_scale_features, mask, semantic_similarity.mean()
+    
+    def normalize_mask(self, mask):
+        # mask : [4, 6, 37, 37]
+        b, c, h, w = mask.shape
+        mask = mask - mask.min() / (mask.max() - mask.min())
+        mask = mask.reshape(b, c, -1)
+        mask = F.softmax(mask / 0.1, dim=-1)
+        mask = mask.reshape(b, c, h, w)
+        mask = mask - mask.min() / (mask.max() - mask.min())
+        return mask 
+        
     
     def plot_image(self, input):
         import matplotlib.pyplot as plt
@@ -310,7 +337,7 @@ class SOFS(nn.Module):
         bs_q, _, img_ori_h, img_ori_w = x_size
         patch_size = self.cfg.TRAIN.SOFS.vit_patch_size
         conv_vit_down_sampling = self.cfg.TRAIN.SOFS.conv_vit_down_sampling
-        final_out, mask_weight, each_normal_similarity, query_multi_scale_features, support_multi_scale_features, mask = self.generate_query_label(x, s_x, s_y)
+        final_out, mask_weight, each_normal_similarity, query_multi_scale_features, support_multi_scale_features, mask, sim_loss = self.generate_query_label(x, s_x, s_y)
 
         if self.training:
             _h, _w = final_out.shape[-2:]
@@ -362,6 +389,8 @@ class SOFS(nn.Module):
             # # ssim_loss = 1 - ssim_loss
             
             # main_loss += ssim_loss * loss_weight
+            
+            main_loss += (1 - sim_loss) 
 
             if self.cfg.TRAIN.SOFS.meta_cls:
                 final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)

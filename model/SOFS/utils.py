@@ -83,6 +83,40 @@ def get_normal_similarity(tmp_q, tmp_s, mask, shot, patch_size=14, conv_vit_down
     return min_max_abnormal_dis
 
 
+def get_similarity_loss(tmp_q, tmp_s, mask, shot, patch_size=14, conv_vit_down_sampling=False):
+    tmp_s = rearrange(tmp_s, "(b n) c h w -> b n c h w", n=shot)
+    bs, shot, d, h, w = tmp_s.shape
+    if conv_vit_down_sampling:
+        tmp_mask = conv_down_sample_vit(mask, patch_size=patch_size)
+    else:
+        tmp_mask = F.interpolate(mask,
+                                 size=(h, w),
+                                 mode="bilinear",
+                                 align_corners=False)
+    tmp_mask = rearrange(tmp_mask, "(b n) 1 h w -> b n 1 h w", n=shot)
+
+    # b h*w c
+    tmp_q = tmp_q.reshape(bs, d, -1).permute(0, 2, 1)
+
+    tmp_s = tmp_s.reshape(bs, shot, d, -1).permute(0, 2, 1, 3).reshape(bs, d, -1).permute(
+        0, 2, 1)
+    tmp_mask = tmp_mask.reshape(bs, shot, 1, -1).permute(0, 2, 1, 3).reshape(bs, 1, -1)
+
+    l2_normalize_s = F.normalize(tmp_s, dim=2)
+    l2_normalize_q = F.normalize(tmp_q, dim=2)
+
+    # b hw (n*hw)
+    similarity = torch.bmm(l2_normalize_q, l2_normalize_s.permute(0, 2, 1))
+
+    # for abnormal segmentation
+    normal_similarity = similarity * (1 - tmp_mask)
+    normal_cos_dis = 1 - normal_similarity.max(2)[0]
+
+    min_max_abnormal_dis = normal_cos_dis.view(bs, 1, h, w)
+    return min_max_abnormal_dis
+
+
+
 #! Add loss for Chamfer distance
 
 
