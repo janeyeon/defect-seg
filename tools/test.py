@@ -101,6 +101,7 @@ def test(cfg):
 
                 # start training
                 torch.cuda.empty_cache()
+                
 
                 if cfg.NUM_GPUS > 1:
                     test_sampler = torch.utils.data.distributed.DistributedSampler(individual_datasets)

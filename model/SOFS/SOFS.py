@@ -266,16 +266,19 @@ class SOFS(nn.Module):
             # normal_similarity : ([4, 6, 37, 37])
             # semantic_similarity : ([4, 6, 37, 37])
             
-            # normal_similarity = self.normalize_mask(normal_similarity)
-            # semantic_similarity = self.normalize_mask(semantic_similarity) 
-
+            
+            # normal_similarity = self.normalize_mask(normal_similarity) # max 0.69
+            # semantic_similarity = self.normalize_mask(semantic_similarity) # max
+            
+            # self.save_image(normal_similarity[0, 0, ...], name="normal_similarity_norm_softmax_0.8.png")
+            # self.save_image(semantic_similarity[0, 0, ...], name="semantic_similarity_norm_softmax_0.8.png")
+            # breakpoint()
 
             
             each_normal_similarity = (normal_similarity.max(1)[0]).unsqueeze(1)
             
-          
             
-
+            
             mask = rearrange(mask, "(b n) c h w -> b n c h w", n=self.shot)
             mask_weight = mask.reshape(bs_q, -1).sum(1)
             mask_weight = (mask_weight > 0).float()
@@ -295,16 +298,23 @@ class SOFS(nn.Module):
     
     def normalize_mask(self, mask):
         # mask : [4, 6, 37, 37]
+        max_val = mask.max()
         b, c, h, w = mask.shape
-        mask = mask - mask.min() / (mask.max() - mask.min())
+        mask = (mask - mask.min()) / (mask.max() - mask.min())
         mask = mask.reshape(b, c, -1)
-        mask = F.softmax(mask / 0.1, dim=-1)
+        # mask = F.softmax(mask / 0.1, dim=-1)
+        # mask = F.softmax(mask / 0.5 , dim=-1)
+        # mask = F.softmax(mask, dim=-1)
+        # mask = F.softmax(mask / 0.8, dim=-1)
+        # mask = F.softmax(mask / 1.5, dim=-1)
+        mask = F.softmax(mask / 0.8, dim=-1)
         mask = mask.reshape(b, c, h, w)
-        mask = mask - mask.min() / (mask.max() - mask.min())
+        mask = (mask - mask.min()) / (mask.max() - mask.min())
+        # mask *= max_val
         return mask 
         
     
-    def plot_image(self, input):
+    def save_image(self, input, name=None):
         import matplotlib.pyplot as plt
         import numpy as np
 
@@ -312,7 +322,10 @@ class SOFS(nn.Module):
         data = input
         # Display the array as an image
         plt.imshow(data.detach().cpu().numpy(), cmap='gray')
-        plt.savefig("./output_image.png")
+        if name:
+            plt.savefig(name)
+        else:
+            plt.savefig("./output_image.png")
         # plt.colorbar()
         # plt.show()
 
@@ -390,7 +403,7 @@ class SOFS(nn.Module):
             
             # main_loss += ssim_loss * loss_weight
             
-            main_loss += (1 - sim_loss) 
+            # main_loss += (1 - sim_loss) 
 
             if self.cfg.TRAIN.SOFS.meta_cls:
                 final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)

@@ -141,11 +141,11 @@ class Feature_Recorrect_Module(nn.Module):
         if self.cfg.TRAIN.SOFS.meta_cls:
             final_out_semantic, s_x_prototype = self.query_semantic_transformer(tmp_query_feat_semantic,
             tmp_supp_feat_merge,
-            tmp_down_sample_mask)
+            tmp_down_sample_mask, semantic_similarity)
         else:
             final_out_semantic = self.query_semantic_transformer(tmp_query_feat_semantic,
             tmp_supp_feat_merge,
-            tmp_down_sample_mask)
+            tmp_down_sample_mask, semantic_similarity)
 
         bs_q, q_d, q_h, q_w = final_out_semantic.shape
 
