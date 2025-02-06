@@ -91,6 +91,7 @@ class SOFS(nn.Module):
             _ = self.backbone(x) # DinoVisionTransformer
             
         multi_scale_features = [self.outputs[key] for key in self.prior_layer_pointer]
+        
         return multi_scale_features
 
     @torch.no_grad()
@@ -226,9 +227,9 @@ class SOFS(nn.Module):
                 similarity2 = []
                 for layer_pointer in self.prior_layer_pointer:
                     sim = get_similarity(eval('query_feat_' + str(layer_pointer)), eval('supp_feat_' + str(layer_pointer)),
-                                                    mask,
-                                                    patch_size=patch_size,
-                                                    conv_vit_down_sampling=conv_vit_down_sampling)
+                    mask,
+                    patch_size=patch_size,
+                    conv_vit_down_sampling=conv_vit_down_sampling)
                     
                     
                     similarity2.append(sim)  # b c h w, (bn) c h w, (bn) 1 h w --> b 1 h w
@@ -242,10 +243,10 @@ class SOFS(nn.Module):
                     similarity2 = []
                     for i in range(self.shot):
                         sim = get_similarity(eval('query_feat_' + str(layer_pointer)),
-                                                        tmp_supp_feat[:, i, ...],
-                                                        mask=mask[:, i, ...],
-                                                        patch_size=patch_size,
-                                                        conv_vit_down_sampling=conv_vit_down_sampling)
+                        tmp_supp_feat[:, i, ...],
+                        mask=mask[:, i, ...],
+                        patch_size=patch_size,
+                        conv_vit_down_sampling=conv_vit_down_sampling)
                         similarity2.append(sim)
 
                     similarity2 = torch.stack(similarity2, dim=1).mean(1)
@@ -263,8 +264,8 @@ class SOFS(nn.Module):
                 layer_out.append(abnormal_dis)
             normal_similarity = torch.concat(layer_out, dim=1)
             
-            # normal_similarity : ([4, 6, 37, 37])
-            # semantic_similarity : ([4, 6, 37, 37])
+            # normal_similarity : ([4, 6, 37, 37]) # -> abnormal 
+            # semantic_similarity : ([4, 6, 37, 37]) # -> semantic
             
             
             # normal_similarity = self.normalize_mask(normal_similarity) # max 0.69
@@ -276,7 +277,6 @@ class SOFS(nn.Module):
 
             
             each_normal_similarity = (normal_similarity.max(1)[0]).unsqueeze(1)
-            
             
             
             mask = rearrange(mask, "(b n) c h w -> b n c h w", n=self.shot)
@@ -431,187 +431,3 @@ class SOFS(nn.Module):
             return final_out
 
 
-
-class SOFS_LoRA(SOFS):
-    def __init__(self, cfg):
-        super().__init__(cfg)
-
-        self.lora_dim = cfg.TRAIN.SOFS_LoRA.lora_dim
-        
-        full_names = []
-        attach_pairs = []
-
-        for name, module in self.backbone.named_modules():
-            for child_name, child_module in module.named_children():
-                if ("blocks" in name) and (child_module.__class__.__name__ == "Linear"):
-                    full_names.append(f"{name}.{child_name}")
-
-                    in_features = child_module.in_features
-                    out_features = child_module.out_features
-                    is_bias = (child_module.bias is not None)
-                    
-                    org_weight = child_module.weight.data
-                    if is_bias:
-                        org_bias = child_module.bias.data
-
-                    lora_layer = LoRALinearLayer(in_features=in_features,\
-                                                out_features=out_features,\
-                                                rank=self.lora_dim)
-
-                    lora_attach_linear = LoRACompatibleLinear(in_features=in_features,\
-                                                            out_features=out_features,\
-                                                            bias=is_bias,\
-                                                            lora_layer=lora_layer)
-
-                    lora_attach_linear.weight.data = org_weight
-                    if is_bias:
-                        lora_attach_linear.bias.data = org_bias
-
-                    # setattr(module, child_name, lora_attach_linear)
-                    attach_pairs.append((module, child_name, lora_attach_linear))
-
-
-        self.lora_attach_layers = dict()
-
-        for idx, pair in enumerate(attach_pairs):
-            setattr(*pair)
-            self.lora_attach_layers[full_names[idx]] = pair[-1]
-
-
-    def encode_feature(self, x):
-        self.outputs.clear()
-        _ = self.backbone(x)
-        
-        multi_scale_features = [self.outputs[key]
-                                for key in self.prior_layer_pointer]
-        return multi_scale_features
-
-
-    def feature_processing_vit(self, features, mask=None):
-        B, L, C = features[0][:, 1:, :].shape
-        h = w = int(math.sqrt(L))
-        multi_scale_features = [each_feature[:, 1:, :].reshape(B, h, w, C).permute(0, 3, 1, 2)
-                                for each_feature in features]
-        if mask is not None:
-            # due to the missing mask, we do not use the mask in this stage for HDM and PFE
-            multi_scale_features_ = []
-            for each_feature in multi_scale_features:
-                tmp_mask = F.interpolate(mask,
-                                         size=(each_feature.size(2),
-                                               each_feature.size(3)),
-                                         mode="bilinear",
-                                         align_corners=False)
-                multi_scale_features_.append(each_feature * tmp_mask)
-            return multi_scale_features_
-        else:
-            return multi_scale_features
-
-
-    def generate_query_label(self, x, s_x, s_y):
-        x_size = x.size()
-        bs_q, _, img_ori_h, img_ori_w = x_size
-        patch_size = self.cfg.TRAIN.SOFS.vit_patch_size
-        conv_vit_down_sampling = self.cfg.TRAIN.SOFS.conv_vit_down_sampling
-
-        query_multi_scale_features = self.encode_feature(x)
-        query_features_list = []
-
-        if self.cfg.TRAIN.backbone in ['dinov2_vitb14', "dinov2_vitl14"]:
-            query_features = self.feature_processing_vit(query_multi_scale_features)
-        elif self.cfg.TRAIN.backbone in ["resnet50", "wideresnet50", 'antialiased_wide_resnet50_2']:
-            query_features = self.feature_processing_cnn(query_multi_scale_features)
-        for idx, layer_pointer in enumerate(self.prior_layer_pointer):
-            exec("query_feat_{}=query_features[{}]".format(layer_pointer, idx))
-            query_features_list.append(eval('query_feat_' + str(layer_pointer)))
-
-        #   Support Feature
-        mask = rearrange(s_y, "b n 1 h w -> (b n) 1 h w")
-        mask = (mask == 1.).float()
-        s_x = rearrange(s_x, "b n c h w -> (b n) c h w")
-        support_multi_scale_features = self.encode_feature(s_x)
-        support_features_list = []
-        if self.cfg.TRAIN.backbone in ['dinov2_vitb14', "dinov2_vitl14"]:
-            support_features = self.feature_processing_vit(support_multi_scale_features)
-        elif self.cfg.TRAIN.backbone in ["resnet50", "wideresnet50", 'antialiased_wide_resnet50_2']:
-            support_features = self.feature_processing_cnn(support_multi_scale_features)
-        for idx, layer_pointer in enumerate(self.prior_layer_pointer):
-            exec("supp_feat_{}=support_features[{}]".format(layer_pointer, idx))
-            support_features_list.append(eval('supp_feat_' + str(layer_pointer)))
-
-        # weighted GAP for every layer
-        supp_feat_bin_list = []
-        for each_layer_supp_feat in support_features_list:
-            if conv_vit_down_sampling:
-                tmp_mask = conv_down_sample_vit(mask, patch_size=patch_size)
-            else:
-                tmp_mask = F.interpolate(
-                    mask,
-                    size=(each_layer_supp_feat.size(2),
-                            each_layer_supp_feat.size(3)),
-                    mode="bilinear",
-                    align_corners=False
-                )
-            supp_feat_bin = Weighted_GAP(
-                each_layer_supp_feat,
-                tmp_mask
-            )
-            supp_feat_bin = supp_feat_bin.repeat(1, 1, each_layer_supp_feat.shape[-2],
-                                                    each_layer_supp_feat.shape[-1])
-            supp_feat_bin_list.append(supp_feat_bin)
-
-        # semantic similarity
-        if self.shot == 1:
-            similarity2 = []
-            for layer_pointer in self.prior_layer_pointer:
-                similarity2.append(get_similarity(eval('query_feat_' + str(layer_pointer)),
-                                                    eval('supp_feat_' + str(layer_pointer)),
-                                                    mask,
-                                                    patch_size=patch_size,
-                                                    conv_vit_down_sampling=conv_vit_down_sampling))  # b c h w, (bn) c h w, (bn) 1 h w --> b 1 h w
-            semantic_similarity = torch.concat(similarity2, dim=1)
-        else:
-            mask = rearrange(mask, "(b n) c h w -> b n c h w", n=self.shot)
-            layer_similarity = []
-            for idx, layer_pointer in enumerate(self.prior_layer_pointer):
-                tmp_supp_feat = rearrange(eval('supp_feat_' + str(layer_pointer)), "(b n) c h w -> b n c h w",
-                                            n=self.shot)
-                similarity2 = []
-                for i in range(self.shot):
-                    similarity2.append(get_similarity(eval('query_feat_' + str(layer_pointer)),
-                                                        tmp_supp_feat[:, i, ...],
-                                                        mask=mask[:, i, ...],
-                                                        patch_size=patch_size,
-                                                        conv_vit_down_sampling=conv_vit_down_sampling))
-
-                similarity2 = torch.stack(similarity2, dim=1).mean(1)
-                layer_similarity.append(similarity2)
-            mask = rearrange(mask, "b n c h w -> (b n) c h w")
-            semantic_similarity = torch.concat(layer_similarity, dim=1)
-
-        # normal similarity
-        layer_out = []
-        for idx, layer_pointer in enumerate(self.prior_layer_pointer):
-            tmp_s = eval('supp_feat_' + str(layer_pointer))
-            tmp_q = eval('query_feat_' + str(layer_pointer))
-
-            abnormal_dis = get_normal_similarity(tmp_q, tmp_s, mask, self.shot, patch_size=patch_size, conv_vit_down_sampling=conv_vit_down_sampling)
-            layer_out.append(abnormal_dis)
-        normal_similarity = torch.concat(layer_out, dim=1)
-        each_normal_similarity = (normal_similarity.max(1)[0]).unsqueeze(1)
-
-        mask = rearrange(mask, "(b n) c h w -> b n c h w", n=self.shot)
-        mask_weight = mask.reshape(bs_q, -1).sum(1)
-        mask_weight = (mask_weight > 0).float()
-        mask = rearrange(mask, "b n c h w -> (b n) c h w")
-
-        final_out = self.feature_recorrect(
-            query_features_list=query_features_list,
-            support_features_list=support_features_list,
-            supp_feat_bin_list=supp_feat_bin_list,
-            semantic_similarity=semantic_similarity,
-            normal_similarity=normal_similarity,
-            mask=mask,
-            conv_vit_down_sampling=conv_vit_down_sampling
-        )
-
-        return final_out, mask_weight, each_normal_similarity

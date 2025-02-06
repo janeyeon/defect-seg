@@ -323,6 +323,7 @@ class MixVisionTransformer(BaseModule):
         # s_x : [4, 5476, 256] 
         # q_under_s, q_init_x : [4, 1369, 256] 
         # semantic_similarity : [4, 6, 37, 37]
+        # attention : ??
         # breakpoint()
         
         # semantic_similarity = similarity_ * mask
@@ -331,26 +332,14 @@ class MixVisionTransformer(BaseModule):
         # q_init_x = q_init_x + q_under_s
         # q_init_x = q_init_x.permute(0, 2, 1).reshape(bs, d, h, w)
         
-        # semantic_similarity = similarity_ 
-        # attention = torch.softmax(semantic_similarity / self.temperature, dim=1)
-        # batch, channel, dim = s_x.shape
-        # defect_feature = s_x[(mask.permute(0, 2, 1) > 0).repeat(1, 1, dim)].reshape(dim, -1).sum(-1).view(1,1,-1).repeat(batch, channel, 1) # [4, 5476, 256]
-        # # q_under_s = torch.bmm(attention, (s_x * mask.permute(0, 2, 1)))
-        # q_under_s = torch.bmm(attention, defect_feature)
-        # q_init_x = q_init_x + q_under_s
-        # q_init_x = q_init_x.permute(0, 2, 1).reshape(bs, d, h, w)
-        
         #? 여기는 똑같은 수준까지 올라감 
-        # semantic_similarity = similarity_ 
-        # attention = torch.softmax(semantic_similarity / self.temperature, dim=1)
-        # q_under_s = torch.bmm(attention, s_x * mask.permute(0, 2, 1))
-        # q_init_x = q_under_s + q_init_x
-        # q_init_x = q_init_x.permute(0, 2, 1).reshape(bs, d, h, w)
         
         semantic_similarity = similarity_ 
         attention = torch.softmax(semantic_similarity / self.temperature, dim=1)
         q_under_s = torch.bmm(attention, s_x * mask.permute(0, 2, 1))
-        q_init_x = q_under_s + q_init_x * 0.5
+        # q_init_x = q_under_s + q_init_x * 0.5
+        # query_temp = torch.bmm(attention, q_init_x)
+        q_init_x = q_under_s
         q_init_x = q_init_x.permute(0, 2, 1).reshape(bs, d, h, w)
         
 

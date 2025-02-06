@@ -129,9 +129,9 @@ _C.TEST_SETUPS.ND_batch_size = 4
 #####################################
 ############# For LoRA ##############
 
-_C.TRAIN.SOFS_LoRA = CfgNode()
-_C.TRAIN.SOFS_LoRA.lora_dim = 0
-_C.TRAIN.SOFS_LoRA.lora_lr = 1e-10
+# _C.TRAIN.SOFS_LoRA = CfgNode()
+# _C.TRAIN.SOFS_LoRA.lora_dim = 0
+# _C.TRAIN.SOFS_LoRA.lora_lr = 1e-10
 
 ############# For LoRA ##############
 #####################################

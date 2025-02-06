@@ -69,7 +69,7 @@ def get_normal_similarity(tmp_q, tmp_s, mask, shot, patch_size=14, conv_vit_down
         0, 2, 1)
     tmp_mask = tmp_mask.reshape(bs, shot, 1, -1).permute(0, 2, 1, 3).reshape(bs, 1, -1)
 
-    l2_normalize_s = F.normalize(tmp_s, dim=2)
+    l2_normalize_s = F.normalize(tmp_s, dim=2) #0-1사이로 만듦
     l2_normalize_q = F.normalize(tmp_q, dim=2)
 
     # b hw (n*hw)
