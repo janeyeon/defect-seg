@@ -337,9 +337,9 @@ class MixVisionTransformer(BaseModule):
         semantic_similarity = similarity_ 
         attention = torch.softmax(semantic_similarity / self.temperature, dim=1)
         q_under_s = torch.bmm(attention, s_x * mask.permute(0, 2, 1))
-        # q_init_x = q_under_s + q_init_x * 0.5
+        q_init_x = q_under_s + q_init_x * 0.5
         # query_temp = torch.bmm(attention, q_init_x)
-        q_init_x = q_under_s
+        # q_init_x = q_under_s
         q_init_x = q_init_x.permute(0, 2, 1).reshape(bs, d, h, w)
         
 

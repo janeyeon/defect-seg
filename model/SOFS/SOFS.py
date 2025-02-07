@@ -267,6 +267,8 @@ class SOFS(nn.Module):
             # normal_similarity : ([4, 6, 37, 37]) # -> abnormal 
             # semantic_similarity : ([4, 6, 37, 37]) # -> semantic
             
+            # normal_similarity = semantic_similarity
+            
             
             # normal_similarity = self.normalize_mask(normal_similarity) # max 0.69
             # semantic_similarity = self.normalize_mask(semantic_similarity) # max
@@ -283,7 +285,35 @@ class SOFS(nn.Module):
             mask_weight = mask.reshape(bs_q, -1).sum(1)
             mask_weight = (mask_weight > 0).float()
             mask = rearrange(mask, "b n c h w -> (b n) c h w")
+        # breakpoint()
+        # #! 들어가기 전에 query fusion 
+        fused_query_features_list = []
+        for idx, layer_pointer in enumerate(self.prior_layer_pointer):
+            tmp_s = eval('supp_feat_' + str(layer_pointer))
+            tmp_q = eval('query_feat_' + str(layer_pointer))
+            rearrage_tmp_s = rearrange(tmp_s, "(b n) c h w -> b n c h w", n=self.shot)
+            bs, shot, d, h, w = rearrage_tmp_s.shape
+            tmp_q = tmp_q.reshape(bs, d, -1).permute(0, 2, 1)
+            rearrage_tmp_s = rearrage_tmp_s.reshape(bs, shot, d, -1).permute(0, 2, 1, 3).reshape(bs, d, -1).permute(0, 2, 1)
+            l2_normalize_s = F.normalize(rearrage_tmp_s, dim=2) #0-1사이로 만듦
+            l2_normalize_q = F.normalize(tmp_q, dim=2)
+            similarity = torch.bmm(l2_normalize_q, l2_normalize_s.permute(0, 2, 1))
+            # sim_value = similarity.max(2)[0].unsqueeze(-1) * 0.5 # 4, 1369, 1
+            sim_value = similarity.max(2)[0].unsqueeze(-1)  # 4, 1369, 1
+            
+            # 가장 높은 similarity를 갖는 tmp_s의 인덱스 찾기
+            max_indices = similarity.max(2)[1]  # (bs, q_n)
 
+            # 인덱스를 이용하여 tmp_s에서 해당하는 값을 가져옴
+            selected_tmp_s = torch.gather(rearrage_tmp_s, 1, max_indices.unsqueeze(-1).expand(-1, -1, d))  # (bs, q_n, d)
+
+            # tmp_q를 해당 tmp_s 값으로 재구성
+            reconstructed_q = selected_tmp_s.clone()
+            new_temp_q = reconstructed_q * sim_value + tmp_q * (1 - sim_value)
+            # new_temp_q = reconstructed_q 
+            new_temp_q = new_temp_q.reshape(bs, d, h, w) # 4, 768, 37, 37, 
+            fused_query_features_list.append(new_temp_q)
+        
         final_out = self.feature_recorrect(
             query_features_list=query_features_list,
             support_features_list=support_features_list,
@@ -291,6 +321,7 @@ class SOFS(nn.Module):
             semantic_similarity=semantic_similarity,
             normal_similarity=normal_similarity,
             mask=mask,
+            fused_query_features_list=fused_query_features_list,
             conv_vit_down_sampling=conv_vit_down_sampling
         )
 

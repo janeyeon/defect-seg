@@ -72,11 +72,27 @@ def get_normal_similarity(tmp_q, tmp_s, mask, shot, patch_size=14, conv_vit_down
     l2_normalize_s = F.normalize(tmp_s, dim=2) #0-1사이로 만듦
     l2_normalize_q = F.normalize(tmp_q, dim=2)
 
-    # b hw (n*hw)
+    #! 뭔가 코드가 이상함 ㅇㅇ 
+    # # b hw (n*hw)
+    # similarity = torch.bmm(l2_normalize_q, l2_normalize_s.permute(0, 2, 1))
+
+    # # for abnormal segmentation
+    # normal_similarity = similarity * (1 - tmp_mask)
+    
+    
+     # b hw (n*hw)
+    # breakpoint()
+    # l2_normalize_q : 4, 1369, 768
+    # l2_normalize_s : 4, 5476, 768
+    # similarity: 4, 1369, 5476
+    # normal_similarity.max(2)[0] : 4, 1369
+    # tmp_mask : 4, 1, 5476
     similarity = torch.bmm(l2_normalize_q, l2_normalize_s.permute(0, 2, 1))
 
     # for abnormal segmentation
-    normal_similarity = similarity * (1 - tmp_mask)
+    normal_similarity = similarity 
+    
+    
     normal_cos_dis = 1 - normal_similarity.max(2)[0]
 
     min_max_abnormal_dis = normal_cos_dis.view(bs, 1, h, w)

@@ -31,6 +31,11 @@ class Feature_Recorrect_Module(nn.Module):
             nn.ReLU(inplace=True),
             nn.Dropout2d(p=0.5)
         )
+        self.down_fused_query = nn.Sequential(
+            nn.Conv2d(fea_dim, reduce_dim, kernel_size=1, padding=0, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Dropout2d(p=0.5)
+        )
         self.down_supp = nn.Sequential(
             nn.Conv2d(fea_dim, reduce_dim, kernel_size=1, padding=0, bias=False),
             nn.ReLU(inplace=True),
@@ -87,6 +92,7 @@ class Feature_Recorrect_Module(nn.Module):
                 semantic_similarity,
                 normal_similarity,
                 mask,
+                fused_query_features_list,
                 conv_vit_down_sampling=False
                 ):
         """
@@ -94,7 +100,7 @@ class Feature_Recorrect_Module(nn.Module):
         tmp_query_feat = torch.cat(query_features_list, 1)
         tmp_supp_feat = torch.cat(support_features_list, 1)
         supp_feat_bin = torch.concat(supp_feat_bin_list, dim=1)
-        
+        fused_query_feat = torch.cat(fused_query_features_list, 1)
         # breakpoint()
         
 #         import matplotlib.pyplot as plt
@@ -111,20 +117,27 @@ class Feature_Recorrect_Module(nn.Module):
         tmp_query_feat = self.down_query(tmp_query_feat)
         tmp_supp_feat = self.down_supp(tmp_supp_feat)
         tmp_supp_feat_bin = self.down_supp_semantic(supp_feat_bin)
+        
+        fused_query_feat = self.down_fused_query(fused_query_feat)
+        
 
         tmp_supp_feat_merge = self.supp_merge_semantic(torch.cat([tmp_supp_feat, tmp_supp_feat_bin], dim=1))
 
         tmp_supp_feat_bin = rearrange(tmp_supp_feat_bin, "(b n) c h w -> b n c h w", n=self.shot)
         tmp_supp_feat_bin = torch.mean(tmp_supp_feat_bin, dim=1)  # 对k-shot的取一个平均向量，b c h w
 
-        if self.cfg.TRAIN.SOFS.normal_sim_aug:
-            query_semantic_similarity = torch.concat([semantic_similarity, normal_similarity], dim=1)
+        
+        if self.cfg.TRAIN.SOFS.normal_sim_aug: # True 
+            query_semantic_similarity = torch.concat([semantic_similarity, normal_similarity], dim=1) # 4, 12, 37, 37
         else:
             query_semantic_similarity = semantic_similarity
             
 
         # follow HDMNet 10*
-        tmp_query_feat_semantic = self.query_merge_semantic(torch.cat([tmp_query_feat, tmp_supp_feat_bin, 10 * query_semantic_similarity], dim=1))
+        # tmp_query_feat_semantic = self.query_merge_semantic(torch.cat([tmp_query_feat, tmp_supp_feat_bin, 10 * query_semantic_similarity], dim=1)) # 4, 524, 37, 37 -> 4, 256, 37, 37
+        #! 들어가는 여기 이부분 바꿈
+        tmp_query_feat_semantic = self.query_merge_semantic(torch.cat([tmp_query_feat, fused_query_feat, 10 * query_semantic_similarity], dim=1)) # 4, 524, 37, 37 -> 4, 256, 37, 37
+        # tmp_query_feat_semantic = self.query_merge_semantic(torch.cat([tmp_query_feat, tmp_supp_feat_bin, 10 * query_semantic_similarity], dim=1)) # 4, 524, 37, 37 -> 4, 256, 37, 37
 
         _, _, supp_h, supp_w = tmp_supp_feat_merge.shape
         if conv_vit_down_sampling:
@@ -138,7 +151,7 @@ class Feature_Recorrect_Module(nn.Module):
 
         #! Non-learnable feature fusion
         # b, d, h, w and b, d
-        if self.cfg.TRAIN.SOFS.meta_cls:
+        if self.cfg.TRAIN.SOFS.meta_cls: #True
             final_out_semantic, s_x_prototype = self.query_semantic_transformer(tmp_query_feat_semantic,
             tmp_supp_feat_merge,
             tmp_down_sample_mask, semantic_similarity)
@@ -149,12 +162,12 @@ class Feature_Recorrect_Module(nn.Module):
 
         bs_q, q_d, q_h, q_w = final_out_semantic.shape
 
-        if self.cfg.TRAIN.SOFS.meta_cls:
+        if self.cfg.TRAIN.SOFS.meta_cls: #True
             final_out_semantic = (s_x_prototype.unsqueeze(1) @ final_out_semantic.view(bs_q, q_d, q_h * q_w)).view(bs_q, 1, q_h, q_w)
         else:
             final_out_semantic = self.cls_semantic(final_out_semantic)
 
-        if self.cfg.TRAIN.SOFS.meta_cls:
+        if self.cfg.TRAIN.SOFS.meta_cls: #True
             final_out = final_out_semantic[:, 0, ...]
         else:
             final_out = final_out_semantic
