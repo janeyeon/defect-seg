@@ -271,7 +271,7 @@ class SOFS(nn.Module):
             
             
             # normal_similarity = self.normalize_mask(normal_similarity) # max 0.69
-            semantic_similarity = self.normalize_mask(semantic_similarity) # max
+            # semantic_similarity = self.normalize_mask(semantic_similarity) # max
             
             # semantic_similarity = semantic_similarity > 0.5
             
@@ -409,8 +409,14 @@ class SOFS(nn.Module):
         threshold = 0.5
         # background = torch.where(final_out_prob.unsqueeze(1) < threshold, 1, 0) 
         # foreground = torch.where(final_out_prob.unsqueeze(1) >= threshold, 1, 0) 
-        background = torch.where(final_out_prob.unsqueeze(1) < 0.7, 1, 0) 
-        foreground = torch.where(final_out_prob.unsqueeze(1) >= 0.3, 1, 0) 
+        
+        area_factor =  s_y.reshape(bs_q, self.shot, -1).sum(-1) / (img_ori_h * img_ori_w) # [bs_q, self.shot]
+        fore_threshold = area_factor.mean(1).mean(0) # [1]
+            
+        background = torch.where(final_out_prob.unsqueeze(1) < 0.7, 1, 0)
+        
+        fore_threshold = fore_threshold * 300             
+        foreground = torch.where(final_out_prob.unsqueeze(1) >= fore_threshold, 1, 0) 
         final_out = torch.cat([background, foreground], dim=1) # 4, 2, 512, 512
         
         return final_out
