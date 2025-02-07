@@ -281,14 +281,13 @@ def epoch_validate_ss(val_loader, model, epoch, cfg, rand_seed, train_validate=F
                     "new_target": []
                 }
 
-            if not train_validate:
+            if not train_validate: # False
                 input_h, input_w = tmp_is.numpy()
                 input_h, input_w = int(input_h), int(input_w)
 
                 original_input_h, original_input_w = tmp_os.numpy()
                 original_input_h, original_input_w = int(original_input_h), int(original_input_w)
                 original_mask = tmp_mask.squeeze(0)[:original_input_h, :original_input_w]
-
                 oav = upsample_output_result(
                     tmp_img=tmp_oav,
                     input_h=input_h,

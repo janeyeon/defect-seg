@@ -271,61 +271,65 @@ class SOFS(nn.Module):
             
             
             # normal_similarity = self.normalize_mask(normal_similarity) # max 0.69
-            # semantic_similarity = self.normalize_mask(semantic_similarity) # max
+            semantic_similarity = self.normalize_mask(semantic_similarity) # max
+            
+            # semantic_similarity = semantic_similarity > 0.5
             
             # self.save_image(normal_similarity[0, 0, ...], name="normal_similarity_norm_softmax_0.8.png")
             # self.save_image(semantic_similarity[0, 0, ...], name="semantic_similarity_norm_softmax_0.8.png")
             # breakpoint()
 
             
-            each_normal_similarity = (normal_similarity.max(1)[0]).unsqueeze(1)
+        #     each_normal_similarity = (normal_similarity.max(1)[0]).unsqueeze(1)
             
             
-            mask = rearrange(mask, "(b n) c h w -> b n c h w", n=self.shot)
-            mask_weight = mask.reshape(bs_q, -1).sum(1)
-            mask_weight = (mask_weight > 0).float()
-            mask = rearrange(mask, "b n c h w -> (b n) c h w")
-        # breakpoint()
-        # #! 들어가기 전에 query fusion 
-        fused_query_features_list = []
-        for idx, layer_pointer in enumerate(self.prior_layer_pointer):
-            tmp_s = eval('supp_feat_' + str(layer_pointer))
-            tmp_q = eval('query_feat_' + str(layer_pointer))
-            rearrage_tmp_s = rearrange(tmp_s, "(b n) c h w -> b n c h w", n=self.shot)
-            bs, shot, d, h, w = rearrage_tmp_s.shape
-            tmp_q = tmp_q.reshape(bs, d, -1).permute(0, 2, 1)
-            rearrage_tmp_s = rearrage_tmp_s.reshape(bs, shot, d, -1).permute(0, 2, 1, 3).reshape(bs, d, -1).permute(0, 2, 1)
-            l2_normalize_s = F.normalize(rearrage_tmp_s, dim=2) #0-1사이로 만듦
-            l2_normalize_q = F.normalize(tmp_q, dim=2)
-            similarity = torch.bmm(l2_normalize_q, l2_normalize_s.permute(0, 2, 1))
-            # sim_value = similarity.max(2)[0].unsqueeze(-1) * 0.5 # 4, 1369, 1
-            sim_value = similarity.max(2)[0].unsqueeze(-1)  # 4, 1369, 1
+        #     mask = rearrange(mask, "(b n) c h w -> b n c h w", n=self.shot)
+        #     mask_weight = mask.reshape(bs_q, -1).sum(1)
+        #     mask_weight = (mask_weight > 0).float()
+        #     mask = rearrange(mask, "b n c h w -> (b n) c h w")
+        # # breakpoint()
+        # # #! 들어가기 전에 query fusion 
+        # fused_query_features_list = []
+        # for idx, layer_pointer in enumerate(self.prior_layer_pointer):
+        #     tmp_s = eval('supp_feat_' + str(layer_pointer))
+        #     tmp_q = eval('query_feat_' + str(layer_pointer))
+        #     rearrage_tmp_s = rearrange(tmp_s, "(b n) c h w -> b n c h w", n=self.shot)
+        #     bs, shot, d, h, w = rearrage_tmp_s.shape
+        #     tmp_q = tmp_q.reshape(bs, d, -1).permute(0, 2, 1)
+        #     rearrage_tmp_s = rearrage_tmp_s.reshape(bs, shot, d, -1).permute(0, 2, 1, 3).reshape(bs, d, -1).permute(0, 2, 1)
+        #     l2_normalize_s = F.normalize(rearrage_tmp_s, dim=2) #0-1사이로 만듦
+        #     l2_normalize_q = F.normalize(tmp_q, dim=2)
+        #     similarity = torch.bmm(l2_normalize_q, l2_normalize_s.permute(0, 2, 1))
+        #     # sim_value = similarity.max(2)[0].unsqueeze(-1) * 0.5 # 4, 1369, 1
+        #     sim_value = similarity.max(2)[0].unsqueeze(-1)  # 4, 1369, 1
             
-            # 가장 높은 similarity를 갖는 tmp_s의 인덱스 찾기
-            max_indices = similarity.max(2)[1]  # (bs, q_n)
+        #     # 가장 높은 similarity를 갖는 tmp_s의 인덱스 찾기
+        #     max_indices = similarity.max(2)[1]  # (bs, q_n)
 
-            # 인덱스를 이용하여 tmp_s에서 해당하는 값을 가져옴
-            selected_tmp_s = torch.gather(rearrage_tmp_s, 1, max_indices.unsqueeze(-1).expand(-1, -1, d))  # (bs, q_n, d)
+        #     # 인덱스를 이용하여 tmp_s에서 해당하는 값을 가져옴
+        #     selected_tmp_s = torch.gather(rearrage_tmp_s, 1, max_indices.unsqueeze(-1).expand(-1, -1, d))  # (bs, q_n, d)
 
-            # tmp_q를 해당 tmp_s 값으로 재구성
-            reconstructed_q = selected_tmp_s.clone()
-            new_temp_q = reconstructed_q * sim_value + tmp_q * (1 - sim_value)
-            # new_temp_q = reconstructed_q 
-            new_temp_q = new_temp_q.reshape(bs, d, h, w) # 4, 768, 37, 37, 
-            fused_query_features_list.append(new_temp_q)
+        #     # tmp_q를 해당 tmp_s 값으로 재구성
+        #     reconstructed_q = selected_tmp_s.clone()
+        #     new_temp_q = reconstructed_q * sim_value + tmp_q * (1 - sim_value)
+        #     # new_temp_q = reconstructed_q 
+        #     new_temp_q = new_temp_q.reshape(bs, d, h, w) # 4, 768, 37, 37, 
+        #     fused_query_features_list.append(new_temp_q)
         
-        final_out = self.feature_recorrect(
-            query_features_list=query_features_list,
-            support_features_list=support_features_list,
-            supp_feat_bin_list=supp_feat_bin_list,
-            semantic_similarity=semantic_similarity,
-            normal_similarity=normal_similarity,
-            mask=mask,
-            fused_query_features_list=fused_query_features_list,
-            conv_vit_down_sampling=conv_vit_down_sampling
-        )
+        # final_out = self.feature_recorrect(
+        #     query_features_list=query_features_list,
+        #     support_features_list=support_features_list,
+        #     supp_feat_bin_list=supp_feat_bin_list,
+        #     semantic_similarity=semantic_similarity,
+        #     normal_similarity=normal_similarity,
+        #     mask=mask,
+        #     fused_query_features_list=fused_query_features_list,
+        #     conv_vit_down_sampling=conv_vit_down_sampling
+        # )
 
-        return final_out, mask_weight, each_normal_similarity, query_multi_scale_features, support_multi_scale_features, mask, semantic_similarity.mean()
+        # return final_out, mask_weight, each_normal_similarity, query_multi_scale_features, support_multi_scale_features, mask, semantic_similarity.mean()
+    
+        return semantic_similarity
     
     def normalize_mask(self, mask):
         # mask : [4, 6, 37, 37]
@@ -338,7 +342,9 @@ class SOFS(nn.Module):
         # mask = F.softmax(mask, dim=-1)
         # mask = F.softmax(mask / 0.8, dim=-1)
         # mask = F.softmax(mask / 1.5, dim=-1)
-        mask = F.softmax(mask / 0.8, dim=-1)
+        # mask = F.softmax(mask / 0.5, dim=-1)
+        mask = F.softmax(mask / 0.2, dim=-1)
+        
         mask = mask.reshape(b, c, h, w)
         mask = (mask - mask.min()) / (mask.max() - mask.min())
         # mask *= max_val
@@ -381,84 +387,110 @@ class SOFS(nn.Module):
         bs_q, _, img_ori_h, img_ori_w = x_size
         patch_size = self.cfg.TRAIN.SOFS.vit_patch_size
         conv_vit_down_sampling = self.cfg.TRAIN.SOFS.conv_vit_down_sampling
-        final_out, mask_weight, each_normal_similarity, query_multi_scale_features, support_multi_scale_features, mask, sim_loss = self.generate_query_label(x, s_x, s_y)
-
-        if self.training:
-            _h, _w = final_out.shape[-2:]
-            if conv_vit_down_sampling:
-                y_m_squeeze = conv_down_sample_vit(y, patch_size=patch_size).squeeze(1)
-            else:
-                y_m_squeeze = F.interpolate(y, size=(_h, _w), mode='bilinear', align_corners=False).squeeze(1)
-
-            y_m_squeeze = (y_m_squeeze > 0.1).float()
-            if self.cfg.TRAIN.SOFS.meta_cls:
-                final_out_prob = torch.sigmoid(final_out).contiguous()
-            else:
-                final_out_prob = torch.softmax(final_out, dim=1)[:, 1, ...].contiguous()
-
-            main_loss = dice_ce_loss_sum(
-                y_m_squeeze=y_m_squeeze,
-                final_out=final_out_prob,
-                dice_weight=self.dice_weight,
-                ce_weight=self.ce_weight,
-                smooth_r=self.cfg.TRAIN.SOFS.smooth_r
-            )
-            
-            #! Add ssim loss
-            # 일단 적당한 dice loss의 크기
-            # tensor(0.9922, device='cuda:0', grad_fn=<AddBackward0>)
-            # breakpoint()
-            # chamfer_and_ssim_loss
-            # y_m_squeeze : [4, 37, 37]
-            # final_out_prob.shape : [4, 37, 37]
-            # support_features_list : [4, 768, 37, 37] x 6 
-            # query_features_list : [4, 768, 37, 37] x 6 
-            # x: torch.Size([4, 3, 518, 518])
-            # y: torch.Size([4, 4, 3, 518, 518]) -> 이 4개의 shot중에서 뭐가 더 나은 이미지일까? 확인해봐야함
-            # _, _, x_h, x_w = x.shape
-            # query_mask_reshaped = F.interpolate(final_out_prob.unsqueeze(1), size=(x_h, x_w), mode='bilinear', align_corners=False)
-            # # query_mask_reshaped : [4, 1,  518, 518]
-            
-            # support_index = 0
-            # loss_weight = 0.5
-            # query_mask = query_mask_reshaped > 0.5
-            # support_mask = s_y[:, support_index, ...] > 0.5
-            
-            # # query_input = x 
-            # # support_input = s_x[:, support_index, ...]
-            # query_input = torch.stack(query_multi_scale_features, dim=0) # [6, 4, 1370, 768]
-            # support_input = torch.stack(support_multi_scale_features, dim=0) # [6, 16, 1370, 768]
-            
-            # ssim_loss = ssim_intersect_bbox_batch(query_input, support_input, query_mask, support_mask)
-            # # ssim_loss = 1 - ssim_loss
-            
-            # main_loss += ssim_loss * loss_weight
-            
-            # main_loss += (1 - sim_loss) 
-
-            if self.cfg.TRAIN.SOFS.meta_cls:
-                final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
-                final_out_prob = torch.sigmoid(final_out).contiguous()
-            else:
-                final_out = F.interpolate(final_out, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False)
-                final_out_prob = torch.softmax(final_out, dim=1)[:, 1, ...].contiguous()
-
-            final_out = torch.cat([1 - final_out_prob.unsqueeze(1), final_out_prob.unsqueeze(1)], dim=1)
-            return final_out.max(1)[1], main_loss
+        # final_out, mask_weight, each_normal_similarity, query_multi_scale_features, support_multi_scale_features, mask, sim_loss = self.generate_query_label(x, s_x, s_y)
+        
+        final_out = self.generate_query_label(x, s_x, s_y)[:, 0, ...] # 4, 37, 37
+        
+        
+        
+        # mask_weight_ = mask_weight.unsqueeze(1).unsqueeze(1)
+        # normal_out = F.interpolate(each_normal_similarity, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
+        # each_normal_similarity_
+        if self.cfg.TRAIN.SOFS.meta_cls: # true
+            final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)  # 4, 512, 512
+            # final_out_prob = torch.sigmoid(final_out).contiguous()
+            final_out_prob = final_out.contiguous()
         else:
-            mask_weight_ = mask_weight.unsqueeze(1).unsqueeze(1)
-            normal_out = F.interpolate(each_normal_similarity, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
-            # each_normal_similarity_
-            if self.cfg.TRAIN.SOFS.meta_cls:
-                final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
-                final_out_prob = torch.sigmoid(final_out).contiguous()
-            else:
-                final_out = F.interpolate(final_out, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False)
-                final_out_prob = torch.softmax(final_out, dim=1)[:, 1, ...].contiguous()
+            final_out = F.interpolate(final_out, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False)
+            final_out_prob = torch.softmax(final_out, dim=1)[:, 1, ...].contiguous()
 
-            final_out_prob = mask_weight_ * final_out_prob + (1 - mask_weight_) * normal_out
+        # final_out_prob = mask_weight_ * final_out_prob + (1 - mask_weight_) * normal_out
+        # final_out = torch.cat([1 - final_out_prob.unsqueeze(1), final_out_prob.unsqueeze(1)], dim=1) # 4, 2, 512, 512
+        threshold = 0.5
+        # background = torch.where(final_out_prob.unsqueeze(1) < threshold, 1, 0) 
+        # foreground = torch.where(final_out_prob.unsqueeze(1) >= threshold, 1, 0) 
+        background = torch.where(final_out_prob.unsqueeze(1) < 0.7, 1, 0) 
+        foreground = torch.where(final_out_prob.unsqueeze(1) >= 0.3, 1, 0) 
+        final_out = torch.cat([background, foreground], dim=1) # 4, 2, 512, 512
+        
+        return final_out
 
-            final_out = torch.cat([1 - final_out_prob.unsqueeze(1), final_out_prob.unsqueeze(1)], dim=1)
-            return final_out
+        # if self.training:
+        #     _h, _w = final_out.shape[-2:]
+        #     if conv_vit_down_sampling:
+        #         y_m_squeeze = conv_down_sample_vit(y, patch_size=patch_size).squeeze(1)
+        #     else:
+        #         y_m_squeeze = F.interpolate(y, size=(_h, _w), mode='bilinear', align_corners=False).squeeze(1)
+
+        #     y_m_squeeze = (y_m_squeeze > 0.1).float()
+        #     if self.cfg.TRAIN.SOFS.meta_cls:
+        #         final_out_prob = torch.sigmoid(final_out).contiguous()
+        #     else:
+        #         final_out_prob = torch.softmax(final_out, dim=1)[:, 1, ...].contiguous()
+
+        #     main_loss = dice_ce_loss_sum(
+        #         y_m_squeeze=y_m_squeeze,
+        #         final_out=final_out_prob,
+        #         dice_weight=self.dice_weight,
+        #         ce_weight=self.ce_weight,
+        #         smooth_r=self.cfg.TRAIN.SOFS.smooth_r
+        #     )
+            
+        #     #! Add ssim loss
+        #     # 일단 적당한 dice loss의 크기
+        #     # tensor(0.9922, device='cuda:0', grad_fn=<AddBackward0>)
+        #     # breakpoint()
+        #     # chamfer_and_ssim_loss
+        #     # y_m_squeeze : [4, 37, 37]
+        #     # final_out_prob.shape : [4, 37, 37]
+        #     # support_features_list : [4, 768, 37, 37] x 6 
+        #     # query_features_list : [4, 768, 37, 37] x 6 
+        #     # x: torch.Size([4, 3, 518, 518])
+        #     # y: torch.Size([4, 4, 3, 518, 518]) -> 이 4개의 shot중에서 뭐가 더 나은 이미지일까? 확인해봐야함
+        #     # _, _, x_h, x_w = x.shape
+        #     # query_mask_reshaped = F.interpolate(final_out_prob.unsqueeze(1), size=(x_h, x_w), mode='bilinear', align_corners=False)
+        #     # # query_mask_reshaped : [4, 1,  518, 518]
+            
+        #     # support_index = 0
+        #     # loss_weight = 0.5
+        #     # query_mask = query_mask_reshaped > 0.5
+        #     # support_mask = s_y[:, support_index, ...] > 0.5
+            
+        #     # # query_input = x 
+        #     # # support_input = s_x[:, support_index, ...]
+        #     # query_input = torch.stack(query_multi_scale_features, dim=0) # [6, 4, 1370, 768]
+        #     # support_input = torch.stack(support_multi_scale_features, dim=0) # [6, 16, 1370, 768]
+            
+        #     # ssim_loss = ssim_intersect_bbox_batch(query_input, support_input, query_mask, support_mask)
+        #     # # ssim_loss = 1 - ssim_loss
+            
+        #     # main_loss += ssim_loss * loss_weight
+            
+        #     # main_loss += (1 - sim_loss) 
+
+        #     if self.cfg.TRAIN.SOFS.meta_cls:
+        #         final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
+        #         final_out_prob = torch.sigmoid(final_out).contiguous()
+        #     else:
+        #         final_out = F.interpolate(final_out, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False)
+        #         final_out_prob = torch.softmax(final_out, dim=1)[:, 1, ...].contiguous()
+
+        #     final_out = torch.cat([1 - final_out_prob.unsqueeze(1), final_out_prob.unsqueeze(1)], dim=1)
+        #     return final_out.max(1)[1], main_loss
+        # else:
+        #     mask_weight_ = mask_weight.unsqueeze(1).unsqueeze(1)
+        #     normal_out = F.interpolate(each_normal_similarity, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
+        #     # each_normal_similarity_
+        #     if self.cfg.TRAIN.SOFS.meta_cls:
+        #         final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
+        #         final_out_prob = torch.sigmoid(final_out).contiguous()
+        #     else:
+        #         final_out = F.interpolate(final_out, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False)
+        #         final_out_prob = torch.softmax(final_out, dim=1)[:, 1, ...].contiguous()
+
+        #     final_out_prob = mask_weight_ * final_out_prob + (1 - mask_weight_) * normal_out
+
+        #     final_out = torch.cat([1 - final_out_prob.unsqueeze(1), final_out_prob.unsqueeze(1)], dim=1)
+        #     return final_out
 
 

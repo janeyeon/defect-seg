@@ -184,120 +184,119 @@ def train(cfg):
                 # todo a single gpu
                 pass
 
-            # start training!
-            for epoch in range(1, cfg.TRAIN_SETUPS.epochs + 1):
-                if cfg.NUM_GPUS > 1:
-                    train_sampler.set_epoch(epoch)
+            # # start training!
+            # for epoch in range(1, cfg.TRAIN_SETUPS.epochs + 1):
+            #     if cfg.NUM_GPUS > 1:
+            #         train_sampler.set_epoch(epoch)
 
-                if epoch % cfg.TRAIN_SETUPS.TEST_SETUPS.train_miou == 0:
-                    validate_each_class = True
-                else:
-                    validate_each_class = False
+            #     if epoch % cfg.TRAIN_SETUPS.TEST_SETUPS.train_miou == 0:
+            #         validate_each_class = True
+            #     else:
+            #         validate_each_class = False
 
 
-                if cfg.DATASET.name in ["VISION_V1", "VISION_V1_ND", "ECCV_Contest_ND"]:
-                    if cfg.TRAIN.method in ["SOFS"]:
-                        epoch_train_ss(
-                            train_loader=train_loader,
-                            model=model,
-                            optimizer=optimizer,
-                            epoch=epoch,
-                            cfg=cfg,
-                            validate_each_class=validate_each_class
-                        )
-                    else:
-                        raise NotImplementedError
-                else:
-                    raise NotImplementedError
+            #     if cfg.DATASET.name in ["VISION_V1", "VISION_V1_ND", "ECCV_Contest_ND"]:
+            #         if cfg.TRAIN.method in ["SOFS"]:
+            #             epoch_train_ss(
+            #                 train_loader=train_loader,
+            #                 model=model,
+            #                 optimizer=optimizer,
+            #                 epoch=epoch,
+            #                 cfg=cfg,
+            #                 validate_each_class=validate_each_class
+            #             )
+            #         else:
+            #             raise NotImplementedError
+            #     else:
+            #         raise NotImplementedError
 
-                if cfg.TRAIN_SETUPS.TEST_SETUPS.test_state:
-                    """
-                                                    prediction
-                                                ______1________0____
-                                              1 |    TP   |   FN   |
-                                ground truth  0 |    FP   |   TN   |
+            if cfg.TRAIN_SETUPS.TEST_SETUPS.test_state:
+                """
+                                                prediction
+                                            ______1________0____
+                                            1 |    TP   |   FN   |
+                            ground truth  0 |    FP   |   TN   |
 
-                                ACC = (TP + TN) / (TP + FP + FN + TN)
+                            ACC = (TP + TN) / (TP + FP + FN + TN)
 
-                                precision = TP / (TP + FP)
+                            precision = TP / (TP + FP)
 
-                                recall (TPR) = TP / (TP + FN)
+                            recall (TPR) = TP / (TP + FN)
 
-                                FPR（False Positive Rate）= FP / (FP + TN)
-                    """
-                    if epoch % cfg.TRAIN_SETUPS.TEST_SETUPS.epoch_test == 0:
-                        for test_idx in range(len(cfg.DATASET.sub_datasets)):
-                            ################################################################################
-                            ############################ Modified for singe GPU ############################                            
-                            if cfg.TRAIN_SETUPS.TEST_SETUPS.val_state:
-                                if cfg.NUM_GPUS > 1:                                
-                                    tmp_val_sampler = val_sampler_list[test_idx]
-                                    tmp_val_sampler.set_epoch(cfg.RNG_SEED)
-                                    
-                                tmp_val_loader = val_loader_list[test_idx]
+                            FPR（False Positive Rate）= FP / (FP + TN)
+                """
+                for test_idx in range(len(cfg.DATASET.sub_datasets)):
+                    ################################################################################
+                    ############################ Modified for singe GPU ############################                            
+                    if cfg.TRAIN_SETUPS.TEST_SETUPS.val_state:
+                        if cfg.NUM_GPUS > 1:                                
+                            tmp_val_sampler = val_sampler_list[test_idx]
+                            tmp_val_sampler.set_epoch(cfg.RNG_SEED)
+                            
+                        tmp_val_loader = val_loader_list[test_idx]
 
-                            if cfg.NUM_GPUS > 1:                                
-                                tmp_test_sampler = test_sampler_list[test_idx]
-                                tmp_test_sampler.set_epoch(cfg.RNG_SEED)
-                            tmp_test_loader = test_loader_list[test_idx]
-                            ############################ Modified for singe GPU ############################                            
-                            ################################################################################
+                    if cfg.NUM_GPUS > 1:                                
+                        tmp_test_sampler = test_sampler_list[test_idx]
+                        tmp_test_sampler.set_epoch(cfg.RNG_SEED)
+                    tmp_test_loader = test_loader_list[test_idx]
+                    ############################ Modified for singe GPU ############################                            
+                    ################################################################################
 
-                            if cfg.DATASET.name in ["VISION_V1", "VISION_V1_ND"]:
-                                if cfg.TRAIN.method in ["SOFS"]:
-                                    if cfg.DATASET.name in ["VISION_V1_ND"]:
-                                        if cfg.TRAIN_SETUPS.TEST_SETUPS.val_state:
-                                            epoch_validate_non_resize_ss(
-                                                val_loader=tmp_val_loader,
-                                                model=model,
-                                                epoch=epoch,
-                                                cfg=cfg,
-                                                rand_seed=cfg.RNG_SEED,
-                                                mode="val"
-                                            )
-                                        epoch_validate_non_resize_ss(
-                                            val_loader=tmp_test_loader,
-                                            model=model,
-                                            epoch=epoch,
-                                            cfg=cfg,
-                                            rand_seed=cfg.RNG_SEED,
-                                            mode="test"
-                                        )
-                                    elif cfg.DATASET.name in ["VISION_V1"]:
-                                        epoch_validate_ss(
-                                            val_loader=tmp_test_loader,
-                                            model=model,
-                                            epoch=epoch,
-                                            cfg=cfg,
-                                            rand_seed=cfg.RNG_SEED
-                                        )
-                                    else:
-                                        raise NotImplementedError
-                                else:
-                                    raise NotImplementedError
+                    if cfg.DATASET.name in ["VISION_V1", "VISION_V1_ND"]:
+                        if cfg.TRAIN.method in ["SOFS"]:
+                            if cfg.DATASET.name in ["VISION_V1_ND"]:
+                                if cfg.TRAIN_SETUPS.TEST_SETUPS.val_state:
+                                    epoch_validate_non_resize_ss(
+                                        val_loader=tmp_val_loader,
+                                        model=model,
+                                        epoch=0,
+                                        cfg=cfg,
+                                        rand_seed=cfg.RNG_SEED,
+                                        mode="val"
+                                    )
+                                epoch_validate_non_resize_ss(
+                                    val_loader=tmp_test_loader,
+                                    model=model,
+                                    epoch=0,
+                                    cfg=cfg,
+                                    rand_seed=cfg.RNG_SEED,
+                                    mode="test"
+                                )
+                            elif cfg.DATASET.name in ["VISION_V1"]:
+                                epoch_validate_ss(
+                                    val_loader=tmp_test_loader,
+                                    model=model,
+                                    epoch=0,
+                                    cfg=cfg,
+                                    rand_seed=cfg.RNG_SEED
+                                )
                             else:
                                 raise NotImplementedError
-
-            # save model
-            if cfg.TRAIN.save_model:
-                base_path = os.path.join(cfg.OUTPUT_DIR, "checkpoints")
-
-                save_name = "_".join(
-                    ["best", "method", cfg.TRAIN.method, cfg.DATASET.name,
-                        "split_" + str(cfg.DATASET.split), ".pth"])
-                while os.path.isfile(os.path.join(base_path, save_name)):
-                    save_name = "new_" + save_name
-                save_name = os.path.join(base_path, save_name)
-
-                if cfg.NUM_GPUS > 1:
-                    model_module = model.module.cpu()
-                    if cfg.TRAIN.method == "SOFS_ada":
-                        torch.save(model_module.backbone.state_dict(), save_name)
+                        else:
+                            raise NotImplementedError
                     else:
-                        torch.save(model_module.state_dict(), save_name)
-                else:
-                    torch.save(model.cpu().state_dict(), save_name)
-                LOGGER.info("Model save in {}".format(save_name))
+                        raise NotImplementedError
+
+            # # save model
+            # if cfg.TRAIN.save_model:
+            #     base_path = os.path.join(cfg.OUTPUT_DIR, "checkpoints")
+
+            #     save_name = "_".join(
+            #         ["best", "method", cfg.TRAIN.method, cfg.DATASET.name,
+            #             "split_" + str(cfg.DATASET.split), ".pth"])
+            #     while os.path.isfile(os.path.join(base_path, save_name)):
+            #         save_name = "new_" + save_name
+            #     save_name = os.path.join(base_path, save_name)
+
+            #     if cfg.NUM_GPUS > 1:
+            #         model_module = model.module.cpu()
+            #         if cfg.TRAIN.method == "SOFS_ada":
+            #             torch.save(model_module.backbone.state_dict(), save_name)
+            #         else:
+            #             torch.save(model_module.state_dict(), save_name)
+            #     else:
+            #         torch.save(model.cpu().state_dict(), save_name)
+            #     LOGGER.info("Model save in {}".format(save_name))
 
 
         LOGGER.info("Method training phase complete!")

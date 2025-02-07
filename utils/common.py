@@ -268,7 +268,7 @@ def acquire_final_mIOU_FBIOU(result_dict, class_iou_class, class_miou, FB_IOU_in
 
             tmp_fb_iou = tmp_intersection / tmp_union
             class_iou_class[query_object + "_" + str(each_category)] = {"background_iou": tmp_fb_iou[0],
-                                                                        "foreground_iou": tmp_fb_iou[1]}
+            "foreground_iou": tmp_fb_iou[1]}
             class_miou += tmp_fb_iou[1]
 
             FB_IOU_intersection += tmp_intersection
