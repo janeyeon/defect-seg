@@ -271,7 +271,7 @@ class SOFS(nn.Module):
             
             
             # normal_similarity = self.normalize_mask(normal_similarity) # max 0.69
-            # semantic_similarity = self.normalize_mask(semantic_similarity) # max
+            semantic_similarity = self.normalize_mask(semantic_similarity) # max
             
             # semantic_similarity = semantic_similarity > 0.5
             
