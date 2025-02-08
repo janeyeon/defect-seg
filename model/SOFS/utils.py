@@ -1,7 +1,8 @@
 import torch
 import torch.nn.functional as F
 from einops import rearrange
-
+from sklearn.cluster import DBSCAN, KMeans
+import numpy as np
 
 def conv_down_sample_vit(mask, patch_size=14):
     conv_param = torch.ones(patch_size, patch_size).cuda()
@@ -13,6 +14,63 @@ def conv_down_sample_vit(mask, patch_size=14):
     down_sample_mask_vit = down_sample_mask_vit / (patch_size * patch_size)
     return down_sample_mask_vit
 
+
+def cluster_prototypes_Kmeans(support_feat, N_clusters=10):
+    S, C = support_feat.shape
+    prototypes = []
+
+    features = support_feat.cpu().numpy()  # (1369, 768)
+
+    # KMeans Clustering
+    kmeans = KMeans(n_clusters=N_clusters, random_state=42, n_init=10)
+    cluster_labels = kmeans.fit_predict(features)  # 각 feature의 클러스터 ID
+
+    cluster_centers = []
+    for cluster_id in range(N_clusters):
+        cluster_points = features[cluster_labels == cluster_id]  # 해당 클러스터에 속한 feature들
+
+        if len(cluster_points) == 0:
+            # 만약 특정 클러스터에 속한 데이터가 없으면 KMeans 중심값을 사용
+            cluster_centers.append(kmeans.cluster_centers_[cluster_id])
+        else:
+            # Weighted GAP 스타일: 클러스터 내의 feature들의 평균
+            cluster_centers.append(cluster_points.mean(axis=0))  
+
+    cluster_centers = torch.tensor(cluster_centers, dtype=torch.float32).to(support_feat.device)
+
+    prototypes.append(cluster_centers)  # (N_clusters, 768)
+
+    return torch.stack(prototypes)  # (B, N_clusters, 768)
+
+def cluster_prototypes_dbscan(support_feat, eps=0.5, min_samples=5):
+    S, C = support_feat.shape
+    # support_feat = support_feat.permute(0,2,3,1).reshape(B,S,C)
+    prototypes = []
+
+    features = support_feat.cpu().numpy()  # (1369, 768)
+
+    # DBSCAN Clustering 수행
+    dbscan = DBSCAN(eps=eps, min_samples=min_samples, metric='euclidean')
+    cluster_labels = dbscan.fit_predict(features)  # (1369,)
+
+    unique_labels = np.unique(cluster_labels)
+    unique_labels = unique_labels[unique_labels != -1]  # Noise(-1) 제거
+
+    cluster_centers = []
+    for label in unique_labels:
+        cluster_points = features[cluster_labels == label]
+        cluster_centers.append(cluster_points.mean(axis=0))  # 클러스터의 평균 벡터를 centroid로 사용
+
+    # Noise 데이터를 고려하여, 클러스터가 너무 적으면 random feature 추가
+    while len(cluster_centers) < 3:  # 최소 3개 prototype 보장
+        random_idx = np.random.choice(S, 1)[0]
+        cluster_centers.append(features[random_idx])
+
+    cluster_centers = torch.tensor(np.stack(cluster_centers), dtype=torch.float32).to(support_feat.device)
+
+    prototypes.append(cluster_centers)  # (N_clusters, 768)
+
+    return torch.stack(prototypes)  # List of (N_clusters, 768)
 
 def Weighted_GAP(supp_feat, mask):
     supp_feat = supp_feat * mask
@@ -71,7 +129,6 @@ def get_normal_similarity(tmp_q, tmp_s, mask, shot, patch_size=14, conv_vit_down
 
     l2_normalize_s = F.normalize(tmp_s, dim=2) #0-1사이로 만듦
     l2_normalize_q = F.normalize(tmp_q, dim=2)
-
     #! 뭔가 코드가 이상함 ㅇㅇ 
     # # b hw (n*hw)
     # similarity = torch.bmm(l2_normalize_q, l2_normalize_s.permute(0, 2, 1))

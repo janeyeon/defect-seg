@@ -62,67 +62,69 @@ def epoch_train_ss(train_loader, model, optimizer, epoch, cfg, validate_each_cla
 
         # if i % 100 != 0:
         #     continue        
-        
+        print(i)
         data_time.update(time.time() - end)
         current_iter = (epoch - 1) * len(train_loader) + i + 1
+        try:
+            if cfg.TRAIN_SETUPS.poly_training:
+                if current_method in ["SOFS"]:
+                    if cfg.TRAIN_SETUPS.learning_rate > 1e-6:
+                        index_split_ = 0
 
-        if cfg.TRAIN_SETUPS.poly_training:
+                        poly_learning_rate(
+                            optimizer,
+                            cfg.TRAIN_SETUPS.learning_rate,
+                            current_iter,
+                            max_iter,
+                            power=0.9,
+                            index_split=index_split_,
+                            warmup=False,
+                            warmup_step=len(train_loader) // 2,
+                            scale_lr=cfg.TRAIN_SETUPS.lr_multiple
+                        )
+
+            s_input = data["support_image"]
+            s_mask = data["support_mask"]
+            input = data["query_image"]
+            target = data["query_mask"]
+            query_object_category_filename = data["query_object_category_filename"]
+
+            s_input = s_input.cuda(non_blocking=True)
+            s_mask = s_mask.cuda(non_blocking=True)
+            input = input.cuda(non_blocking=True)
+            target = target.cuda(non_blocking=True)
+
+            optimizer.zero_grad()
             if current_method in ["SOFS"]:
-                if cfg.TRAIN_SETUPS.learning_rate > 1e-6:
-                    index_split_ = 0
+                output, main_loss = model(s_x=s_input, s_y=s_mask, x=input, y=target)
+                loss = main_loss
+            else:
+                raise NotImplementedError
 
-                    poly_learning_rate(
-                        optimizer,
-                        cfg.TRAIN_SETUPS.learning_rate,
-                        current_iter,
-                        max_iter,
-                        power=0.9,
-                        index_split=index_split_,
-                        warmup=False,
-                        warmup_step=len(train_loader) // 2,
-                        scale_lr=cfg.TRAIN_SETUPS.lr_multiple
-                    )
+            loss.backward()
 
-        s_input = data["support_image"]
-        s_mask = data["support_mask"]
-        input = data["query_image"]
-        target = data["query_mask"]
-        query_object_category_filename = data["query_object_category_filename"]
+            optimizer.step()
+            n = input.size(0)  # batch_size
 
-        s_input = s_input.cuda(non_blocking=True)
-        s_mask = s_mask.cuda(non_blocking=True)
-        input = input.cuda(non_blocking=True)
-        target = target.cuda(non_blocking=True)
+            if validate_each_class:
+                acquire_training_miou(
+                    result_dict=result_dict,
+                    query_object_category_filename=query_object_category_filename,
+                    output_absolute_val=output,
+                    target=target
+                )
 
-        optimizer.zero_grad()
-        if current_method in ["SOFS"]:
-            output, main_loss = model(s_x=s_input, s_y=s_mask, x=input, y=target)
-            loss = main_loss
-        else:
-            raise NotImplementedError
+            intersection, union, target = intersectionAndUnionGPU(output, target.squeeze(1), 2, 255)
+            intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
+            intersection_meter.update(intersection), union_meter.update(union), target_meter.update(target)
 
-        loss.backward()
+            main_loss_meter.update(main_loss.item(), n)
+            loss_meter.update(loss.item(), n)
 
-        optimizer.step()
-        n = input.size(0)  # batch_size
-
-        if validate_each_class:
-            acquire_training_miou(
-                result_dict=result_dict,
-                query_object_category_filename=query_object_category_filename,
-                output_absolute_val=output,
-                target=target
-            )
-
-        intersection, union, target = intersectionAndUnionGPU(output, target.squeeze(1), 2, 255)
-        intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
-        intersection_meter.update(intersection), union_meter.update(union), target_meter.update(target)
-
-        main_loss_meter.update(main_loss.item(), n)
-        loss_meter.update(loss.item(), n)
-
-        batch_time.update(time.time() - end - val_time)
-        end = time.time()
+            batch_time.update(time.time() - end - val_time)
+            end = time.time()
+        except:
+            breakpoint()
 
     
     iou_class = intersection_meter.sum / (union_meter.sum + 1e-10)
@@ -238,137 +240,143 @@ def epoch_validate_ss(val_loader, model, epoch, cfg, rand_seed, train_validate=F
 
         # if i % 100 != 0:
         #     continue
-        
-        s_input = data["support_image"]
-        s_mask = data["support_mask"]
-        input = data["query_image"]
-        target = data["query_mask"]
-        query_original_shape = data["query_original_shape"]
-        query_input_shape = data["query_input_shape"]
-        query_object_category_filename = data["query_object_category_filename"]
-        support_img_path = data["support_img_path"]
+        print(i)
+        try:
+            s_input = data["support_image"]
+            s_mask = data["support_mask"]
+            input = data["query_image"]
+            target = data["query_mask"]
+            query_original_shape = data["query_original_shape"]
+            query_input_shape = data["query_input_shape"]
+            query_object_category_filename = data["query_object_category_filename"]
+            support_img_path = data["support_img_path"]
 
-        s_input = s_input.cuda(non_blocking=True)
-        s_mask = s_mask.cuda(non_blocking=True)
-        input = input.cuda(non_blocking=True)
-        target = target.cuda(non_blocking=True)
+            s_input = s_input.cuda(non_blocking=True)
+            s_mask = s_mask.cuda(non_blocking=True)
+            input = input.cuda(non_blocking=True)
+            target = target.cuda(non_blocking=True)
 
-        start_time = time.time()
-        if current_method in ["SOFS"]:
-            output = model(s_x=s_input, s_y=s_mask, x=input)
+            start_time = time.time()
+            if current_method in ["SOFS"]:
+                output = model(s_x=s_input, s_y=s_mask, x=input)
+            else:
+                raise NotImplementedError
+            model_time.update(time.time() - start_time)
+
+            if current_method in ["SOFS"]:
+                output_absolute_val = output.max(1)[1]
+                # heatmap
+                output_heatmap = output[:, 1, ...]
+
+            for tmp_ocf, tmp_os, tmp_is, tmp_oav, tmp_ohm, tmp_mask, sip in zip(query_object_category_filename,
+                                                                                query_original_shape,
+                                                                                query_input_shape,
+                                                                                output_absolute_val,
+                                                                                output_heatmap,
+                                                                                target,
+                                                                                support_img_path
+                                                                                ):
+                query_object, query_category, query_filename = tmp_ocf.split("^")
+                if int(query_category) not in result_dict[query_object].keys():
+                    result_dict[query_object][int(query_category)] = {
+                        "intersection": [],
+                        "union": [],
+                        "new_target": []
+                    }
+
+                if not train_validate: # False
+                    input_h, input_w = tmp_is.numpy()
+                    input_h, input_w = int(input_h), int(input_w)
+
+                    original_input_h, original_input_w = tmp_os.numpy()
+                    original_input_h, original_input_w = int(original_input_h), int(original_input_w)
+                    original_mask = tmp_mask.squeeze(0)[:original_input_h, :original_input_w]
+                    oav = upsample_output_result(
+                        tmp_img=tmp_oav,
+                        input_h=input_h,
+                        input_w=input_w,
+                        original_input_h=original_input_h,
+                        original_input_w=original_input_w,
+                        quantization=True
+                    )
+
+                    ohm = upsample_output_result(
+                        tmp_img=tmp_ohm,
+                        input_h=input_h,
+                        input_w=input_w,
+                        original_input_h=original_input_h,
+                        original_input_w=original_input_w,
+                        quantization=False
+                    )
+                else:
+                    original_mask = tmp_mask.squeeze(0)
+                    oav = tmp_oav
+                    ohm = tmp_ohm
+
+                intersection, union, target = intersectionAndUnionGPU(oav, original_mask, 2, 255)
+                intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
+                result_dict[query_object][int(query_category)]["intersection"].append(intersection)
+                result_dict[query_object][int(query_category)]["union"].append(union)
+                result_dict[query_object][int(query_category)]["new_target"].append(target)
+
+                if np.random.rand(1)[0] < cfg.TEST.VISUALIZE.sample_prob:
+                    if cfg.TEST.VISUALIZE.save_figure:
+                        test_num += 1
+                        fig_save_path = os.path.join(cfg.OUTPUT_DIR, "figure_save")
+                        os.makedirs(fig_save_path, exist_ok=True)
+
+                        fig_save_path = os.path.join(fig_save_path, "_".join(["split",
+                                                                            str(cfg.DATASET.split), "epoch_",
+                                                                            str(epoch)]))
+                        os.makedirs(fig_save_path, exist_ok=True)
+
+                        produce_qualitative_result(
+                            original_mask=original_mask,
+                            oav=oav,
+                            ohm=ohm,
+                            source_path=cfg.TRAIN.dataset_path,
+                            query_object=query_object,
+                            query_filename=query_filename,
+                            fig_save_path=fig_save_path,
+                            test_num=test_num,
+                            support_img_path=sip
+            
+                        )
+        except:
+            breakpoint()
+        val_time = time.time() - val_start
+
+        if cfg.DATASET.name in ["VISION_V1", "VISION_V1_ND"]:
+            result_dict_total = {i: {} for i in VISION_V1_split_test_dict[data_split]}
+        elif cfg.DATASET.name in ["DS_Spectrum_DS", "DS_Spectrum_DS_ND"]:
+            result_dict_total = {i: {} for i in DS_Spectrum_DS_split_test_dict[data_split]}
+        elif cfg.DATASET.name in ["openset_test_dataset", "openset_test_dataset_ND"]:
+            result_dict_total = {i: {} for i in cfg.DATASET.open_set_test_object}
         else:
             raise NotImplementedError
-        model_time.update(time.time() - start_time)
-
-        if current_method in ["SOFS"]:
-            output_absolute_val = output.max(1)[1]
-            # heatmap
-            output_heatmap = output[:, 1, ...]
-
-        for tmp_ocf, tmp_os, tmp_is, tmp_oav, tmp_ohm, tmp_mask, sip in zip(query_object_category_filename,
-                                                                            query_original_shape,
-                                                                            query_input_shape,
-                                                                            output_absolute_val,
-                                                                            output_heatmap,
-                                                                            target,
-                                                                            support_img_path
-                                                                            ):
-            query_object, query_category, query_filename = tmp_ocf.split("^")
-            if int(query_category) not in result_dict[query_object].keys():
-                result_dict[query_object][int(query_category)] = {
-                    "intersection": [],
-                    "union": [],
-                    "new_target": []
-                }
-
-            if not train_validate: # False
-                input_h, input_w = tmp_is.numpy()
-                input_h, input_w = int(input_h), int(input_w)
-
-                original_input_h, original_input_w = tmp_os.numpy()
-                original_input_h, original_input_w = int(original_input_h), int(original_input_w)
-                original_mask = tmp_mask.squeeze(0)[:original_input_h, :original_input_w]
-                oav = upsample_output_result(
-                    tmp_img=tmp_oav,
-                    input_h=input_h,
-                    input_w=input_w,
-                    original_input_h=original_input_h,
-                    original_input_w=original_input_w,
-                    quantization=True
-                )
-
-                ohm = upsample_output_result(
-                    tmp_img=tmp_ohm,
-                    input_h=input_h,
-                    input_w=input_w,
-                    original_input_h=original_input_h,
-                    original_input_w=original_input_w,
-                    quantization=False
-                )
-            else:
-                original_mask = tmp_mask.squeeze(0)
-                oav = tmp_oav
-                ohm = tmp_ohm
-
-            intersection, union, target = intersectionAndUnionGPU(oav, original_mask, 2, 255)
-            intersection, union, target = intersection.cpu().numpy(), union.cpu().numpy(), target.cpu().numpy()
-            result_dict[query_object][int(query_category)]["intersection"].append(intersection)
-            result_dict[query_object][int(query_category)]["union"].append(union)
-            result_dict[query_object][int(query_category)]["new_target"].append(target)
-
-            if np.random.rand(1)[0] < cfg.TEST.VISUALIZE.sample_prob:
-                if cfg.TEST.VISUALIZE.save_figure:
-                    test_num += 1
-                    fig_save_path = os.path.join(cfg.OUTPUT_DIR, "figure_save")
-                    os.makedirs(fig_save_path, exist_ok=True)
-
-                    fig_save_path = os.path.join(fig_save_path, "_".join(["split",
-                                                                          str(cfg.DATASET.split), "epoch_",
-                                                                          str(epoch)]))
-                    os.makedirs(fig_save_path, exist_ok=True)
-
-                    produce_qualitative_result(
-                        original_mask=original_mask,
-                        oav=oav,
-                        ohm=ohm,
-                        source_path=cfg.TRAIN.dataset_path,
-                        query_object=query_object,
-                        query_filename=query_filename,
-                        fig_save_path=fig_save_path,
-                        test_num=test_num,
-                        support_img_path=sip
-                    )
-    val_time = time.time() - val_start
-
-    if cfg.DATASET.name in ["VISION_V1", "VISION_V1_ND"]:
-        result_dict_total = {i: {} for i in VISION_V1_split_test_dict[data_split]}
-    elif cfg.DATASET.name in ["DS_Spectrum_DS", "DS_Spectrum_DS_ND"]:
-        result_dict_total = {i: {} for i in DS_Spectrum_DS_split_test_dict[data_split]}
-    elif cfg.DATASET.name in ["openset_test_dataset", "openset_test_dataset_ND"]:
-        result_dict_total = {i: {} for i in cfg.DATASET.open_set_test_object}
-    else:
-        raise NotImplementedError
 
 
 
-    ################################################################################
-    ############################ Modified for singe GPU ############################
+        ################################################################################
+        ############################ Modified for singe GPU ############################
 
-    result_dict_total = result_dict
+        result_dict_total = result_dict
 
-    class_iou_class = {}
-    class_miou = 0
-    FB_IOU_intersection = np.array([0., 0.])
-    FB_IOU_union = np.array([0., 0.])
+        class_iou_class = {}
+        class_miou = 0
+        FB_IOU_intersection = np.array([0., 0.])
+        FB_IOU_union = np.array([0., 0.])
 
-    class_miou, class_iou_class, FB_IOU = acquire_final_mIOU_FBIOU(
-        result_dict=result_dict_total,
-        class_iou_class=class_iou_class,
-        class_miou=class_miou,
-        FB_IOU_intersection=FB_IOU_intersection,
-        FB_IOU_union=FB_IOU_union
-    )
-    
+        class_miou, class_iou_class, FB_IOU = acquire_final_mIOU_FBIOU(
+            result_dict=result_dict_total,
+            class_iou_class=class_iou_class,
+            class_miou=class_miou,
+            FB_IOU_intersection=FB_IOU_intersection,
+            FB_IOU_union=FB_IOU_union
+        )
+        
+      
+
     ############################ Modified for singe GPU ############################
     ################################################################################
         

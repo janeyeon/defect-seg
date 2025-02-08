@@ -1,0 +1,104 @@
+[02/08 19:09:19][INFO] train.py:   47: {'DATASET': {'area_resize_ratio': 0.01,
+             'crop_ratio': [1.0, 1.0],
+             'crop_size': 518,
+             'few_shot_repeated_multiple': 1,
+             'image_size': 518,
+             'mask_size': 518,
+             'name': 'VISION_V1_ND',
+             'normal_sample_sampling_prob': 0.3,
+             'open_domain_object_category_num': [1],
+             'open_domain_specific_defect_category': [0],
+             'open_domain_test_object': ['severstal_steel'],
+             'rotate_max': 10,
+             'rotate_min': -10,
+             's_in_shot': 4,
+             'shot': 1,
+             'split': 0,
+             'sub_datasets': ['original'],
+             'test_sample_repeated_multiple': 1,
+             'transform_length_width_ratio': True,
+             'unified_mask_size': 4500,
+             'vision_data_load': False,
+             'vision_data_save': True,
+             'vision_data_save_path': './vision_data_new'},
+ 'DEVICE': 3,
+ 'DIST_BACKEND': 'nccl',
+ 'NUM_GPUS': 1,
+ 'NUM_SHARDS': 1,
+ 'OUTPUT_DIR': './log_FsSS_IVI_VISION_V1_ND_SOFS_54',
+ 'RNG_SEED': 54,
+ 'SHARD_ID': 0,
+ 'TEST': {'VISUALIZE': CfgNode({'save_figure': False, 'sample_prob': 0.2}),
+          'dataset_path': '/home/jeeit18/b1/defect-seg/data/Vision_v1',
+          'enable': False,
+          'load_checkpoint': False,
+          'load_model_path': './save_model',
+          'method': 'SOFS',
+          'semantic_threshold': 0.6},
+ 'TEST_SETUPS': CfgNode({'batch_size': 1, 'ND_batch_size': 4}),
+ 'TRAIN': {'LOSS': CfgNode({'dice_weight': 1.0, 'ce_weight': 0.01}),
+           'SOFS': {'conv_vit_down_sampling': True,
+                    'meta_cls': True,
+                    'normal_sim_aug': True,
+                    'prior_layer_pointer': [5, 6, 7, 8, 9, 10],
+                    'reduce_dim': 256,
+                    'smooth_r': 1.0,
+                    'target_semantic_temperature': 0.1,
+                    'transformer_embed_dim': 256,
+                    'transformer_num_stages': 2,
+                    'transformer_nums_heads': 4,
+                    'vit_patch_size': 14},
+           'backbone': 'dinov2_vitb14',
+           'backbone_checkpoint': './backbones/dinov2_vitb14_pretrain.pth',
+           'backbone_load_state_dict': True,
+           'dataset_path': '/home/jeeit18/b1/defect-seg/data/Vision_v1',
+           'enable': True,
+           'load_checkpoint': False,
+           'load_model_path': './',
+           'method': 'SOFS',
+           'save_model': True},
+ 'TRAIN_SETUPS': {'TEST_SETUPS': {'epoch_test': 1,
+                                  'test_state': True,
+                                  'train_miou': 1,
+                                  'val_state': False},
+                  'batch_size': 4,
+                  'epochs': 1,
+                  'learning_rate': 1e-05,
+                  'lr_multiple': 2.0,
+                  'num_workers': 4,
+                  'optimizer_momentum': 0.9,
+                  'poly_training': True,
+                  'weight_decay': 0.01}}
+[02/08 19:09:19][INFO] train.py:   50: start main training!
+[02/08 19:09:19][INFO] train.py:   53: load dataset!
+[02/08 19:09:19][INFO] vision_v1_fsss_ND.py:   92: current training class is ['Console', 'Casting', 'Groove', 'Capacitor', 'PCB_2', 'Screw', 'Cylinder', 'Electronics', 'Lens']
+[02/08 19:10:29][INFO] vision_v1_fsss_ND.py:   98: current test class is ['PCB_1', 'Hemisphere', 'Wood', 'Ring', 'Cable']
+[02/08 19:10:51][INFO] train.py:   62: load complete!
+[02/08 19:10:51][INFO] train.py:   70: current dataset is VISION_V1_ND_original.
+[02/08 19:10:51][INFO] train.py:   71: the data in current dataset VISION_V1_ND_original are 1530.
+[02/08 19:10:51][INFO] train.py:  117: current dataset is VISION_V1_ND_original.
+[02/08 19:10:51][INFO] train.py:  118: the test data in current dataset VISION_V1_ND_original are 940.
+[02/08 19:10:51][INFO] train.py:  134: load model!
+[02/08 19:10:51][INFO] vision_transformer.py:  122: using MLP layer as FFN
+[02/08 19:10:52][INFO] train.py:  147: load optimizer!
+[02/08 19:10:52][INFO] epoch_train_eval_ss.py:  407: Start validate!
+[02/08 19:13:33][ERROR] train.py:  304: error：
+[02/08 19:13:33][ERROR] train.py:  305: The expanded size of the tensor (3) must match the existing size (4) at non-singleton dimension 1.  Target sizes: [-1, 3, -1, -1].  Tensor sizes: [4, 37, 37]
+[02/08 19:13:33][ERROR] train.py:  306: 
+Traceback (most recent call last):
+  File "/home/jeeit18/b1/defect-seg/tools/train.py", line 257, in train
+    epoch_validate_non_resize_ss(
+  File "/home/jeeit18/.conda/envs/defect/lib/python3.9/site-packages/torch/utils/_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+  File "/home/jeeit18/b1/defect-seg/tools/epoch_train_eval_ss.py", line 527, in epoch_validate_non_resize_ss
+    tmp_output = model(s_x=support_input_m, s_y=support_mask_m, x=query_input_m)
+  File "/home/jeeit18/.conda/envs/defect/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1553, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/jeeit18/.conda/envs/defect/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1562, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/jeeit18/b1/defect-seg/model/SOFS/SOFS.py", line 459, in forward
+    masked_x = self.apply_binary_mask(x, final_out)
+  File "/home/jeeit18/b1/defect-seg/model/SOFS/SOFS.py", line 412, in apply_binary_mask
+    mask = final_out.expand(-1, x.shape[1], -1, -1)
+RuntimeError: The expanded size of the tensor (3) must match the existing size (4) at non-singleton dimension 1.  Target sizes: [-1, 3, -1, -1].  Tensor sizes: [4, 37, 37]
+

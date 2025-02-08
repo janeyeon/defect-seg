@@ -98,7 +98,8 @@ class SOFS(nn.Module):
         return multi_scale_features
 
     @torch.no_grad()
-    
+    # 만약에 mask가 있다면 mask 있는 부분의 feature만 뽑고 
+    # 아니라면 그냥 class token 을 뺀 feature를 반환
     def feature_processing_vit(self, features, mask=None):
         B, L, C = features[0][:, 1:, :].shape
         h = w = int(math.sqrt(L))
@@ -168,7 +169,8 @@ class SOFS(nn.Module):
 
     def generate_query_label(self, x, s_x, s_y):
         x_size = x.size()
-        # [4,3,518,518]
+        # 애초에 x 의 size가 [4,3,518,518]임
+        # query 4개 (batch size임)
         bs_q, _, img_ori_h, img_ori_w = x_size
         # for b in range(bs_q):
         #     image =  x[b].permute(1,2,0).detach().cpu().numpy()
@@ -179,8 +181,9 @@ class SOFS(nn.Module):
         conv_vit_down_sampling = self.cfg.TRAIN.SOFS.conv_vit_down_sampling
 
         with torch.no_grad():
-            
-            # [4, 1370, 768] x 6
+            # dino에서 feature를 뽑는 부분
+            # query_multi_scale_features의 len 은 6 : 왜냐하면 6개의 layer로 부터 feature를 뽑음
+            # 그리고 각각의 feature는 [4, 1370, 768] x 6
             query_multi_scale_features = self.encode_feature(x)
             query_features_list = []
             
@@ -199,13 +202,15 @@ class SOFS(nn.Module):
             mask = (mask == 1.).float()
             s_x = rearrange(s_x, "b n c h w -> (b n) c h w")
             
-            #  [16, 1370, 768] x 6
+            # 그니까 당연히 얘는 [16, 1370, 768] x 6이 되는구나
             support_multi_scale_features = self.encode_feature(s_x)
             support_features_list = []
             if self.cfg.TRAIN.backbone in ['dinov2_vitb14', "dinov2_vitl14"]:
                 support_features = self.feature_processing_vit(support_multi_scale_features)
             elif self.cfg.TRAIN.backbone in ["resnet50", "wideresnet50", 'antialiased_wide_resnet50_2']:
                 support_features = self.feature_processing_cnn(support_multi_scale_features)
+
+            # supp_feat_3 = support_feature[0], supp_feat_4 = support_feature[1], .. 이런식
             
             for idx, layer_pointer in enumerate(self.prior_layer_pointer):
                 exec("supp_feat_{}=support_features[{}]".format(layer_pointer, idx))
@@ -216,6 +221,7 @@ class SOFS(nn.Module):
             for each_layer_supp_feat in support_features_list:
                 masks = []
                 if conv_vit_down_sampling: # True
+                    # mask를 VIT patch에 맞게 만들어주는 부분임 (37x37로 만들기)
                     tmp_mask = conv_down_sample_vit(mask, patch_size=patch_size)
                 else:
                     tmp_mask = F.interpolate(
@@ -225,7 +231,8 @@ class SOFS(nn.Module):
                         mode="bilinear",
                         align_corners=False
                     )
-                #  [16, 768, 1, 1] 임 (prototype)
+                # 각각의 feature level 에서 defect에 대한 feature를 만들어냄 
+                # 여기서는 supp_feat_bin 의 shape이 [16, 768, 1, 1] 임 (prototype)
                 supp_feat_bin = Weighted_GAP(
                     each_layer_supp_feat,
                     tmp_mask
@@ -241,8 +248,7 @@ class SOFS(nn.Module):
 
                 for b in range(B):
                     batch_idx = b//self.shot
-                    prototype_r = cluster_prototypes_Kmeans(normal_supp_feat[b])
-                    #prototype_r = cluster_prototypes_dbscan(normal_supp_feat[b])
+                    prototype_r = cluster_prototypes_dbscan(normal_supp_feat[b])
                     supp_feat_b = supp_feat_bin[0].squeeze(1).squeeze(1).unsqueeze(0)
                     proto_feat_b = prototype_r.squeeze(0)
                     all_proto_b = torch.cat([supp_feat_b, proto_feat_b], dim=0).unsqueeze(-1).unsqueeze(-1)
@@ -405,16 +411,7 @@ class SOFS(nn.Module):
         mask = (mask - mask.min()) / (mask.max() - mask.min())
         # mask *= max_val
         return mask 
-    
-    def apply_binary_mask(self, x, final_out, alpha=0.5):
         
-        # final_out의 shape을 (B, 1, H, W) -> (B, 3, H, W)로 확장 (broadcasting)
-        mask = final_out.expand(-1, x.shape[1], -1, -1)
-
-        # 마스크가 1인 부분은 원본 유지, 0인 부분은 alpha만큼 어둡게
-        masked_x = x * mask + (1 - mask) * x * alpha  # 0일 때 alpha만큼 줄이기
-
-        return masked_x    
     
     def save_image(self, input, name=None):
         import matplotlib.pyplot as plt
@@ -454,16 +451,15 @@ class SOFS(nn.Module):
         conv_vit_down_sampling = self.cfg.TRAIN.SOFS.conv_vit_down_sampling
         # final_out, mask_weight, each_normal_similarity, query_multi_scale_features, support_multi_scale_features, mask, sim_loss = self.generate_query_label(x, s_x, s_y)
         
-       # final_out = self.generate_query_label(x, s_x, s_y)[:, 0, ...] # 4, 37, 37
-        final_out = self.generate_query_label(x, s_x, s_y).mean(1)
-        # masked_x = self.apply_binary_mask(x, final_out)
+        final_out = self.generate_query_label(x, s_x, s_y)[:, 0, ...] # 4, 37, 37
+        
         
         # mask_weight_ = mask_weight.unsqueeze(1).unsqueeze(1)
         # normal_out = F.interpolate(each_normal_similarity, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
         # each_normal_similarity_
         if self.cfg.TRAIN.SOFS.meta_cls: # true
             final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)  # 4, 512, 512
-        # final_out_prob = torch.sigmoid(final_out).contiguous()
+            # final_out_prob = torch.sigmoid(final_out).contiguous()
         #     final_out_prob = final_out.contiguous()
         # else:
         #     final_out = F.interpolate(final_out, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False)
@@ -471,14 +467,16 @@ class SOFS(nn.Module):
 
         # final_out_prob = mask_weight_ * final_out_prob + (1 - mask_weight_) * normal_out
         # final_out = torch.cat([1 - final_out_prob.unsqueeze(1), final_out_prob.unsqueeze(1)], dim=1) # 4, 2, 512, 512
+        threshold = 0.5
         # background = torch.where(final_out_prob.unsqueeze(1) < threshold, 1, 0) 
-        # foreground = torch.where(final_out_prob.unsqueeze(1) >= threshold, 1, 0) 0[background, foreground], dim=1) # 4, 2, 512, 512
+        # foreground = torch.where(final_out_prob.unsqueeze(1) >= threshold, 1, 0) 
+        # background = torch.where(final_out_prob.unsqueeze(1) < 0.7, 1, 0) 
+        # foreground = torch.where(final_out_prob.unsqueeze(1) >= 0.3, 1, 0) 
         final_out = final_out.unsqueeze(1)
         foreground = final_out
         background = 1-final_out
         final_out = torch.cat([background, foreground], dim=1) # 4, 2, 512, 512
-
-
+        
         return final_out
 
         # if self.training:

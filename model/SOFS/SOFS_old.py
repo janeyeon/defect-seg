@@ -5,13 +5,12 @@ import torch.nn.functional as F
 from utils.common import freeze_paras, ForwardHook, dice_ce_loss_sum
 from utils import load_backbones
 from einops import rearrange
-from sklearn.cluster import DBSCAN, KMeans
+
 from model.SOFS.Feature_Recorrect import Feature_Recorrect_Module
 from model.SOFS.utils import Weighted_GAP, get_similarity, get_normal_similarity, conv_down_sample_vit
-import matplotlib.pyplot as plt
-import numpy as np
+
 from .lora import LoRALinearLayer, LoRACompatibleLinear
-from model.SOFS.utils import cluster_prototypes_dbscan, cluster_prototypes_Kmeans
+
 #! Add new loss 
 from model.SOFS.utils import ssim_intersect_bbox_batch
 
@@ -86,8 +85,6 @@ class SOFS(nn.Module):
             cfg=cfg
         )
 
-
-
     def encode_feature(self, x):
         self.outputs.clear()
         with torch.no_grad():
@@ -98,7 +95,6 @@ class SOFS(nn.Module):
         return multi_scale_features
 
     @torch.no_grad()
-    
     def feature_processing_vit(self, features, mask=None):
         B, L, C = features[0][:, 1:, :].shape
         h = w = int(math.sqrt(L))
@@ -114,8 +110,6 @@ class SOFS(nn.Module):
                                          mode="bilinear",
                                          align_corners=False)
                 multi_scale_features_.append(each_feature * tmp_mask)
-            # multi scale feature를 mask와 각각 곱함 mask의 크기에 맞게
-            
             return multi_scale_features_
         else:
             return multi_scale_features
@@ -168,25 +162,21 @@ class SOFS(nn.Module):
 
     def generate_query_label(self, x, s_x, s_y):
         x_size = x.size()
-        # [4,3,518,518]
         bs_q, _, img_ori_h, img_ori_w = x_size
-        # for b in range(bs_q):
-        #     image =  x[b].permute(1,2,0).detach().cpu().numpy()
-        #     image = (image - image.min()) / (image.max() - image.min())  # 0~1 정규화
-        #     plt.imsave(f"./x_original_{b}.png",image)
-        # breakpoint()
         patch_size = self.cfg.TRAIN.SOFS.vit_patch_size
         conv_vit_down_sampling = self.cfg.TRAIN.SOFS.conv_vit_down_sampling
 
         with torch.no_grad():
-            
-            # [4, 1370, 768] x 6
             query_multi_scale_features = self.encode_feature(x)
+            #  <- 여기에서 dino로 넘겨줌 : 
+            # query_multi_scale_features(List[Tensor]): [4, 1370, 768] x 6 
+            # encode feature에 사용한 모델은 DinoVisionTransformer 
+            #! 왜 여기서 multi-scale이라고 하지? 여러 layer에서 뽑으니까 
             query_features_list = []
-            
+
             if self.cfg.TRAIN.backbone in ['dinov2_vitb14', "dinov2_vitl14"]:
                 query_features = self.feature_processing_vit(query_multi_scale_features)
-
+                # <- 이건 왜 해놓고 안씀?? 위에서 이미 써서 그런가? 
             elif self.cfg.TRAIN.backbone in ["resnet50", "wideresnet50", 'antialiased_wide_resnet50_2']:
                 query_features = self.feature_processing_cnn(query_multi_scale_features)
             for idx, layer_pointer in enumerate(self.prior_layer_pointer):
@@ -194,27 +184,24 @@ class SOFS(nn.Module):
                 query_features_list.append(eval('query_feat_' + str(layer_pointer)))
 
             #   Support Feature
-            # s_y 는 [4, 4, 1, 518, 518] : [batch size, shot 수 , _ , org_h, org_w]
+            #? support image의 mask를 뽑아오는 과정 
             mask = rearrange(s_y, "b n 1 h w -> (b n) 1 h w")
             mask = (mask == 1.).float()
             s_x = rearrange(s_x, "b n c h w -> (b n) c h w")
-            
-            #  [16, 1370, 768] x 6
             support_multi_scale_features = self.encode_feature(s_x)
             support_features_list = []
             if self.cfg.TRAIN.backbone in ['dinov2_vitb14', "dinov2_vitl14"]:
                 support_features = self.feature_processing_vit(support_multi_scale_features)
             elif self.cfg.TRAIN.backbone in ["resnet50", "wideresnet50", 'antialiased_wide_resnet50_2']:
                 support_features = self.feature_processing_cnn(support_multi_scale_features)
-            
             for idx, layer_pointer in enumerate(self.prior_layer_pointer):
                 exec("supp_feat_{}=support_features[{}]".format(layer_pointer, idx))
                 support_features_list.append(eval('supp_feat_' + str(layer_pointer)))
-            # support_features_list는 길이가 6 (6개의 layer), 각각의 shape은 [16, 768, 37, 37]
-            # supp_feat_bin_list = []
-            feature_masks = []
+
+            # weighted GAP for every layer
+            #?  support_features_list(List[Tensor]): [16, 768, 37, 37] x 6
+            supp_feat_bin_list = []
             for each_layer_supp_feat in support_features_list:
-                masks = []
                 if conv_vit_down_sampling: # True
                     tmp_mask = conv_down_sample_vit(mask, patch_size=patch_size)
                 else:
@@ -225,110 +212,66 @@ class SOFS(nn.Module):
                         mode="bilinear",
                         align_corners=False
                     )
-                #  [16, 768, 1, 1] 임 (prototype)
                 supp_feat_bin = Weighted_GAP(
                     each_layer_supp_feat,
                     tmp_mask
                 )
-                B, C, H, W = each_layer_supp_feat.shape
-                batch_size = B//self.shot
-                cos_sim_per_shot = [[] for _ in range(batch_size)]
-
-                each_layer_supp_feat = each_layer_supp_feat.permute(0, 2, 3, 1).reshape(B, H*W, C)  # (B, 1369, 768)
-                mask_flat = tmp_mask.permute(0, 2, 3, 1).reshape(B, H*W).unsqueeze(-1).expand_as(each_layer_supp_feat)
-                normal_supp_feat = [each_layer_supp_feat[b][mask_flat[b] == 0] for b in range(B)] 
-                normal_supp_feat = [n.view(-1, 768) for n in normal_supp_feat]
-
-                for b in range(B):
-                    batch_idx = b//self.shot
-                    prototype_r = cluster_prototypes_Kmeans(normal_supp_feat[b])
-                    #prototype_r = cluster_prototypes_dbscan(normal_supp_feat[b])
-                    supp_feat_b = supp_feat_bin[0].squeeze(1).squeeze(1).unsqueeze(0)
-                    proto_feat_b = prototype_r.squeeze(0)
-                    all_proto_b = torch.cat([supp_feat_b, proto_feat_b], dim=0).unsqueeze(-1).unsqueeze(-1)
-                    all_prototype = all_proto_b.repeat(1, 1, H, W).reshape(-1, C, H*W)
-                    cos_sim = F.cosine_similarity(
-                        each_layer_supp_feat[b].unsqueeze(0),
-                        all_prototype.permute(0,2,1),
-                        dim=-1
-                    )
-                    cos_sim_per_shot[batch_idx].append(cos_sim)
-                cos_sim_avg = [torch.stack(cos_list, dim=0).mean(dim=0) for cos_list in cos_sim_per_shot]  # (batch_size, C', H*W)
-                cos_sim_avg = torch.stack(cos_sim_avg, dim=0)  # (batch_size, C', H*W)
-                best_channel_idx = cos_sim_avg.argmax(dim=1)
-                mask_result = (best_channel_idx==0).float()
-                feature_masks.append(mask_result)
-            feature_masks = [fm.view(batch_size, H, W) for fm in feature_masks]
-            semantic_similarity = torch.stack(feature_masks, dim=1)  # (4, 6, 37, 37)            
-        
-        # semantic_similarity = self.normalize_mask(semantic_similarity) # max
-    
-            #         best_channel_idx = cos_sim.argmax(dim=0)
-            #         mask_result = (best_channel_idx==0).int()
-            #         masks.append(mask_result)
-            #     feature_masks.append(masks)
-            # semantic_similarity = torch.stack([torch.stack(f, dim=0) for f in feature_masks], dim=1)
-                #     all_prototype  all_prototype.reshape(-1, C, H*W)
-                #     supp_feat_bin_list.append(all_prototype).
-                # breakpoint()
-                # supp_feat_bin = supp_feat_bin.repeat(1, 1, each_layer_supp_feat.shape[-2], each_layer_supp_feat.shape[-1])
-                # supp_feat_bin_list.append(supp_feat_bin)
-                # supp_feat_bin_list는 len이 6, 각각은 shape이 [16, 768, 37, 37] 
+                # temp_mask: [16, 1, 37, 37]
+                # each_layer_supp_feat : [16, 768, 37, 37]
+                supp_feat_bin = supp_feat_bin.repeat(1, 1, each_layer_supp_feat.shape[-2], each_layer_supp_feat.shape[-1])
+                supp_feat_bin_list.append(supp_feat_bin)
 
             # semantic similarity
             # self.shot = 4 
-            # if self.shot == 1:
-            #     similarity2 = []
-            #     for layer_pointer in self.prior_layer_pointer:
-            #         sim = get_similarity(eval('query_feat_' + str(layer_pointer)), eval('supp_feat_' + str(layer_pointer)),
-            #         mask,
-            #         patch_size=patch_size,
-            #         conv_vit_down_sampling=conv_vit_down_sampling)
+            if self.shot == 1:
+                similarity2 = []
+                for layer_pointer in self.prior_layer_pointer:
+                    sim = get_similarity(eval('query_feat_' + str(layer_pointer)), eval('supp_feat_' + str(layer_pointer)),
+                    mask,
+                    patch_size=patch_size,
+                    conv_vit_down_sampling=conv_vit_down_sampling)
                     
                     
-            #         similarity2.append(sim)  # b c h w, (bn) c h w, (bn) 1 h w --> b 1 h w
-            #     semantic_similarity = torch.concat(similarity2, dim=1)
-            # else:
-            #     # [16, 1, 37, 37] 로 되어있는 걸 , [4, 4, 1, 37, 37] 로 바꿈
-            #     mask = rearrange(mask, "(b n) c h w -> b n c h w", n=self.shot)
-            #     layer_similarity = []
-            #     for idx, layer_pointer in enumerate(self.prior_layer_pointer):
-            #         # n번째 feature를 일단 뽑고 
-            #         tmp_supp_feat = rearrange(eval('supp_feat_' + str(layer_pointer)), "(b n) c h w -> b n c h w",
-            #                                 n=self.shot)
-            #         similarity2 = []
-            #         # shot에 맞춰서 그냥 각각의 similarity 랑 잰다
-            #         for i in range(self.shot):
-            #             sim = get_similarity(eval('query_feat_' + str(layer_pointer)),
-            #             tmp_supp_feat[:, i, ...],
-            #             mask=mask[:, i, ...],
-            #             patch_size=patch_size,
-            #             conv_vit_down_sampling=conv_vit_down_sampling)
-            #             similarity2.append(sim)
+                    similarity2.append(sim)  # b c h w, (bn) c h w, (bn) 1 h w --> b 1 h w
+                semantic_similarity = torch.concat(similarity2, dim=1)
+            else:
+                mask = rearrange(mask, "(b n) c h w -> b n c h w", n=self.shot)
+                layer_similarity = []
+                for idx, layer_pointer in enumerate(self.prior_layer_pointer):
+                    tmp_supp_feat = rearrange(eval('supp_feat_' + str(layer_pointer)), "(b n) c h w -> b n c h w",
+                                            n=self.shot)
+                    similarity2 = []
+                    for i in range(self.shot):
+                        sim = get_similarity(eval('query_feat_' + str(layer_pointer)),
+                        tmp_supp_feat[:, i, ...],
+                        mask=mask[:, i, ...],
+                        patch_size=patch_size,
+                        conv_vit_down_sampling=conv_vit_down_sampling)
+                        similarity2.append(sim)
+                    similarity2 = torch.stack(similarity2, dim=1).mean(1)
+                    layer_similarity.append(similarity2)
+                mask = rearrange(mask, "b n c h w -> (b n) c h w")
+                semantic_similarity = torch.concat(layer_similarity, dim=1)
 
-            #         similarity2 = torch.stack(similarity2, dim=1).mean(1)
-            #         layer_similarity.append(similarity2)
-            #     mask = rearrange(mask, "b n c h w -> (b n) c h w")
-            #     semantic_similarity = torch.concat(layer_similarity, dim=1)
+            # normal similarity
+            layer_out = []
+            for idx, layer_pointer in enumerate(self.prior_layer_pointer):
+                tmp_s = eval('supp_feat_' + str(layer_pointer))
+                tmp_q = eval('query_feat_' + str(layer_pointer))
 
-            # # normal similarity
-            # layer_out = []
-            # for idx, layer_pointer in enumerate(self.prior_layer_pointer):
-            #     tmp_s = eval('supp_feat_' + str(layer_pointer))
-            #     tmp_q = eval('query_feat_' + str(layer_pointer))
-
-            #     abnormal_dis = get_normal_similarity(tmp_q, tmp_s, mask, self.shot, patch_size=patch_size, conv_vit_down_sampling=conv_vit_down_sampling)
-            #     layer_out.append(abnormal_dis)
-            # normal_similarity = torch.concat(layer_out, dim=1)
+                abnormal_dis = get_normal_similarity(tmp_q, tmp_s, mask, self.shot, patch_size=patch_size, conv_vit_down_sampling=conv_vit_down_sampling)
+                layer_out.append(abnormal_dis)
+            normal_similarity = torch.concat(layer_out, dim=1)
             
-            # # normal_similarity : ([4, 6, 37, 37]) # -> abnormal 
-            # # semantic_similarity : ([4, 6, 37, 37]) # -> semantic
+            # normal_similarity : ([4, 6, 37, 37]) # -> abnormal 
+            # semantic_similarity : ([4, 6, 37, 37]) # -> semantic
             
-            # # normal_similarity = semantic_similarity
+            # normal_similarity = semantic_similarity
             
             
-            # # normal_similarity = self.normalize_mask(normal_similarity) # max 0.69
+            # normal_similarity = self.normalize_mask(normal_similarity) # max 0.69
             # semantic_similarity = self.normalize_mask(semantic_similarity) # max
+            
             # semantic_similarity = semantic_similarity > 0.5
             
             # self.save_image(normal_similarity[0, 0, ...], name="normal_similarity_norm_softmax_0.8.png")
@@ -384,7 +327,7 @@ class SOFS(nn.Module):
         # )
 
         # return final_out, mask_weight, each_normal_similarity, query_multi_scale_features, support_multi_scale_features, mask, semantic_similarity.mean()
-    
+        breakpoint()
         return semantic_similarity
     
     def normalize_mask(self, mask):
@@ -405,16 +348,7 @@ class SOFS(nn.Module):
         mask = (mask - mask.min()) / (mask.max() - mask.min())
         # mask *= max_val
         return mask 
-    
-    def apply_binary_mask(self, x, final_out, alpha=0.5):
         
-        # final_out의 shape을 (B, 1, H, W) -> (B, 3, H, W)로 확장 (broadcasting)
-        mask = final_out.expand(-1, x.shape[1], -1, -1)
-
-        # 마스크가 1인 부분은 원본 유지, 0인 부분은 alpha만큼 어둡게
-        masked_x = x * mask + (1 - mask) * x * alpha  # 0일 때 alpha만큼 줄이기
-
-        return masked_x    
     
     def save_image(self, input, name=None):
         import matplotlib.pyplot as plt
@@ -454,31 +388,36 @@ class SOFS(nn.Module):
         conv_vit_down_sampling = self.cfg.TRAIN.SOFS.conv_vit_down_sampling
         # final_out, mask_weight, each_normal_similarity, query_multi_scale_features, support_multi_scale_features, mask, sim_loss = self.generate_query_label(x, s_x, s_y)
         
-       # final_out = self.generate_query_label(x, s_x, s_y)[:, 0, ...] # 4, 37, 37
-        final_out = self.generate_query_label(x, s_x, s_y).mean(1)
-        # masked_x = self.apply_binary_mask(x, final_out)
+        final_out = self.generate_query_label(x, s_x, s_y)[:, 0, ...] # 4, 37, 37
+        
+        
         
         # mask_weight_ = mask_weight.unsqueeze(1).unsqueeze(1)
         # normal_out = F.interpolate(each_normal_similarity, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
         # each_normal_similarity_
         if self.cfg.TRAIN.SOFS.meta_cls: # true
             final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)  # 4, 512, 512
-        # final_out_prob = torch.sigmoid(final_out).contiguous()
-        #     final_out_prob = final_out.contiguous()
-        # else:
-        #     final_out = F.interpolate(final_out, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False)
-        #     final_out_prob = torch.softmax(final_out, dim=1)[:, 1, ...].contiguous()
+            # final_out_prob = torch.sigmoid(final_out).contiguous()
+            final_out_prob = final_out.contiguous()
+        else:
+            final_out = F.interpolate(final_out, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False)
+            final_out_prob = torch.softmax(final_out, dim=1)[:, 1, ...].contiguous()
 
         # final_out_prob = mask_weight_ * final_out_prob + (1 - mask_weight_) * normal_out
         # final_out = torch.cat([1 - final_out_prob.unsqueeze(1), final_out_prob.unsqueeze(1)], dim=1) # 4, 2, 512, 512
+        threshold = 0.5
         # background = torch.where(final_out_prob.unsqueeze(1) < threshold, 1, 0) 
-        # foreground = torch.where(final_out_prob.unsqueeze(1) >= threshold, 1, 0) 0[background, foreground], dim=1) # 4, 2, 512, 512
-        final_out = final_out.unsqueeze(1)
-        foreground = final_out
-        background = 1-final_out
+        # foreground = torch.where(final_out_prob.unsqueeze(1) >= threshold, 1, 0) 
+        
+        area_factor =  s_y.reshape(bs_q, self.shot, -1).sum(-1) / (img_ori_h * img_ori_w) # [bs_q, self.shot]
+        fore_threshold = area_factor.mean(1).mean(0) # [1]
+            
+        background = torch.where(final_out_prob.unsqueeze(1) < 0.7, 1, 0)
+        
+        fore_threshold = fore_threshold * 300             
+        foreground = torch.where(final_out_prob.unsqueeze(1) >= fore_threshold, 1, 0) 
         final_out = torch.cat([background, foreground], dim=1) # 4, 2, 512, 512
-
-
+        
         return final_out
 
         # if self.training:
@@ -558,5 +497,4 @@ class SOFS(nn.Module):
 
         #     final_out = torch.cat([1 - final_out_prob.unsqueeze(1), final_out_prob.unsqueeze(1)], dim=1)
         #     return final_out
-
 

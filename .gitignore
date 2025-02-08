@@ -15,3 +15,5 @@ log_FsSS_IVI_VISION_V1_ND_SOFS_54/*
 vision_data_new/*
 Dockerfile
 backbones/*
+
+data/*
