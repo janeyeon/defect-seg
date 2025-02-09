@@ -261,7 +261,7 @@ class SOFS(nn.Module):
                 
                 batch_idx = torch.arange(B, device=normal_supp_feat[0].device) // self.shot  # 벡터화된 batch index 계산
 
-                N_clusters = 5
+                N_clusters = 10
                 # 프로토타입 계산 (벡터화)
                 prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768
                 
