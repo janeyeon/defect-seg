@@ -30,7 +30,7 @@ TRAIN:
   enable: True
   save_model: False
   method: 'SOFS'
-  dataset_path: '../data/Vision_v1'
+  dataset_path: '/home/jeeit18/b1/defect-seg/data/Vision_v1'
 
   backbone: 'dinov2_vitb14'
   backbone_load_state_dict: True
@@ -80,7 +80,7 @@ TRAIN_SETUPS:
 TEST:
   enable: False
   method: 'SOFS'
-  dataset_path: '../data/Vision_v1'
+  dataset_path: '/home/jeeit18/b1/defect-seg/data/Vision_v1'
   load_checkpoint: False
   load_model_path: "./save_model"
 

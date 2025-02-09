@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from einops import rearrange
 from sklearn.cluster import DBSCAN, KMeans
 import numpy as np
-
+from kmeans_pytorch import kmeans
 def conv_down_sample_vit(mask, patch_size=14):
     conv_param = torch.ones(patch_size, patch_size).cuda()
     down_sample_mask_vit = F.conv2d(
@@ -42,37 +42,56 @@ def conv_down_sample_vit(mask, patch_size=14):
 
 #     return torch.stack(prototypes)  # (B, N_clusters, 768)
 
-
-def cluster_prototypes_Kmeans(support_feat, N_clusters=10):
+def cluster_prototypes_Kmeans(support_feat, num_clusters=10, device='cuda'):
     S, C = support_feat.shape  # (1369, 768)
+    support_feat = support_feat.to(device)
 
-    # 데이터를 numpy로 변환 (단순 변환, 불필요한 copy 방지)
-    features = support_feat.detach().cpu().numpy()  
+    cluster_ids_x, cluster_centers = kmeans(
+        X=support_feat, num_clusters=num_clusters, distance='euclidean', device=torch.device(device)
+    )
+    cluster_ids_x = cluster_ids_x.to(device).long()
+    cluster_centers = cluster_centers.to(device)
 
-    # KMeans 클러스터링 수행 (n_init='auto'로 최적화)
-    kmeans = KMeans(n_clusters=N_clusters, random_state=42, n_init='auto')
-    kmeans.fit(features)
+    cluster_sums = torch.zeros((num_clusters, C), device=support_feat.device)  # (num_clusters, C)
+    cluster_counts = torch.zeros((num_clusters, 1), device=support_feat.device)  # (num_clusters, 1)
+    
+    cluster_sums.scatter_add_(0, cluster_ids_x.view(-1, 1).expand(-1, C), support_feat)
+    cluster_counts.scatter_add_(0, cluster_ids_x.view(-1, 1), torch.ones((S, 1), device=device))
+    
+    valid_mask = cluster_counts.squeeze() > 0  # (num_clusters,)
+    cluster_sums[valid_mask] /= cluster_counts[valid_mask]
+    
+    return cluster_sums  # (num_clusters, C)
 
-    # 클러스터 레이블 및 중심점
-    cluster_labels = kmeans.labels_
-    cluster_centers = kmeans.cluster_centers_  # KMeans 자체 평균값
+# def cluster_prototypes_Kmeans(support_feat, N_clusters=10):
+#     S, C = support_feat.shape  # (1369, 768)
 
-    # 벡터화된 평균 계산 (각 클러스터에 속한 데이터 평균)
-    cluster_sums = np.zeros((N_clusters, C), dtype=np.float32)
-    cluster_counts = np.bincount(cluster_labels, minlength=N_clusters).reshape(-1, 1)
+#     # 데이터를 numpy로 변환 (단순 변환, 불필요한 copy 방지)
+#     features = support_feat.detach().cpu().numpy()  
+#     # KMeans 클러스터링 수행 (n_init='auto'로 최적화)
+#     kmeans = KMeans(n_clusters=N_clusters, random_state=42, n_init='auto')
+#     kmeans.fit(features)
 
-    # 클러스터별로 feature 합산 (벡터 연산 최적화)
-    np.add.at(cluster_sums, cluster_labels, features)
+#     # 클러스터 레이블 및 중심점
+#     cluster_labels = kmeans.labels_
+#     cluster_centers = kmeans.cluster_centers_  # KMeans 자체 평균값
 
-    # 클러스터 내 요소가 없는 경우 예외 처리 (원래 중심값 유지)
-    valid_mask = cluster_counts.squeeze() > 0  # (N_clusters,) 형태로 변경
-    cluster_sums[valid_mask] /= cluster_counts[valid_mask]  # 평균 연산
+#     # 벡터화된 평균 계산 (각 클러스터에 속한 데이터 평균)
+#     cluster_sums = np.zeros((N_clusters, C), dtype=np.float32)
+#     cluster_counts = np.bincount(cluster_labels, minlength=N_clusters).reshape(-1, 1)
 
-    # 텐서 변환 (최소한의 `.to()` 호출)
-    cluster_centers = torch.from_numpy(cluster_sums).to(support_feat.device)
+#     # 클러스터별로 feature 합산 (벡터 연산 최적화)
+#     np.add.at(cluster_sums, cluster_labels, features)
+
+#     # 클러스터 내 요소가 없는 경우 예외 처리 (원래 중심값 유지)
+#     valid_mask = cluster_counts.squeeze() > 0  # (N_clusters,) 형태로 변경
+#     cluster_sums[valid_mask] /= cluster_counts[valid_mask]  # 평균 연산
+
+#     # 텐서 변환 (최소한의 `.to()` 호출)
+#     cluster_centers = torch.from_numpy(cluster_sums).to(support_feat.device)
     
 
-    return cluster_centers  # (N_clusters, C)
+#     return cluster_centers  # (N_clusters, C)
 
 
 def cluster_prototypes_dbscan(support_feat, eps=0.5, min_samples=5):
