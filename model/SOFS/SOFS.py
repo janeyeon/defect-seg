@@ -16,6 +16,25 @@ from model.SOFS.utils import cluster_prototypes_dbscan, cluster_prototypes_Kmean
 from model.SOFS.utils import ssim_intersect_bbox_batch
 
 
+import torch.jit
+from concurrent.futures import ThreadPoolExecutor
+
+def parallel_cluster_prototypes_Kmeans(support_features, N_clusters):
+    """
+    Multi-threaded execution of cluster_prototypes_Kmeans for each batch.
+    """
+    B = len(support_features)
+    futures = []
+    
+    # Use torch.jit.fork for parallel processing on GPU
+    for b in range(B):
+        futures.append(torch.jit.fork(cluster_prototypes_Kmeans, support_features[b], N_clusters))
+    
+    # Collect results
+    results = [torch.jit.wait(f) for f in futures]
+    
+    return torch.stack(results, dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
+
 class SOFS(nn.Module):
     def __init__(self, cfg):
         super(SOFS, self).__init__()
@@ -238,206 +257,52 @@ class SOFS(nn.Module):
                 normal_supp_feat = [each_layer_supp_feat_reshape[b][mask_flat[b] == 0] for b in range(B)] 
                 normal_supp_feat = [n.view(-1, C) for n in normal_supp_feat]
 
-                # for b in range(B):
-                #     batch_idx = b//self.shot
-                #     prototype_r = cluster_prototypes_Kmeans(normal_supp_feat[b])
-                #     #prototype_r = cluster_prototypes_dbscan(normal_supp_feat[b])
-                #     supp_feat_b = supp_feat_bin[0].squeeze(1).squeeze(1).unsqueeze(0)
-                #     proto_feat_b = prototype_r.squeeze(0)
-                #     all_proto_b = torch.cat([supp_feat_b, proto_feat_b], dim=0).unsqueeze(-1).unsqueeze(-1)
-                #     all_prototype = all_proto_b.repeat(1, 1, H, W).reshape(-1, C, H*W)
-                #     cos_sim = F.cosine_similarity(
-                #         each_layer_supp_feat[b].unsqueeze(0),
-                #         all_prototype.permute(0,2,1),
-                #         dim=-1
-                #     )
-                #     cos_sim_per_shot[batch_idx].append(cos_sim)
-                # cos_sim_avg = [torch.stack(cos_list, dim=0).mean(dim=0) for cos_list in cos_sim_per_shot]  # (batch_size, C', H*W)
-                # cos_sim_avg = torch.stack(cos_sim_avg, dim=0)  # (batch_size, C', H*W)
-                # best_channel_idx = cos_sim_avg.argmax(dim=1)
-                # mask_result = (best_channel_idx==0).float()
-                # feature_masks.append(mask_result)
-                
-                
-                batch_idx = torch.arange(B, device=normal_supp_feat[0].device) // self.shot  # 벡터화된 batch index 계산
-
+                #! 이 부분 갯수를 support mask 크기에 따라서 바꾸기
                 N_clusters = 10
                 # 프로토타입 계산 (벡터화)
-                prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768
+                
+                # thread or GPU
+                # prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
+                
+                prototype_r = parallel_cluster_prototypes_Kmeans(normal_supp_feat, N_clusters)
+                
                 
                 prototype_r = prototype_r.unsqueeze(-1).unsqueeze(-1).view(batch_size, -1, 768, 1, 1) # 16, N_clusters, 768, 1, 1
                 
-                # Support feature 변환 (벡터 연산 사용)
-                # supp_feat_b = supp_feat_bin[0].squeeze().squeeze(1).unsqueeze(0).expand(B, -1, -1)  # (B, C, 1) # 16, 1, 768
-                
+                # Support feature 변환 (벡터 연산 사용)                
                 supp_feat_b = supp_feat_bin.unsqueeze(1).view(batch_size, self.shot, C, 1, 1) # 16, 1, 768, 1, 1 -> 16, 10, 768
-                
                 
                 # 프로토타입과 Support feature 결합
                 all_proto_b = torch.cat([supp_feat_b, prototype_r], dim=1)  # (batch, shot * C', C, 1, 1), C' = 1 + N_clusters
                 all_prototype = all_proto_b.expand(-1, -1, -1, H, W).reshape(batch_size, -1, C, H * W)  # (batch, shot * C', C, H*W)
                 query_feat = query_features[i].view(batch_size, C, H*W) 
-
                 # 코사인 유사도 연산 최적화
                 norm_each_layer = query_feat.norm(dim=1, keepdim=True).view(batch_size, 1, H * W).repeat(1, self.shot * (1+N_clusters), 1)  # 정규화 , batch, self.shot * C', 1, H*W
-                norm_proto = all_prototype.norm(dim=2)  # 정규화  B, shot * C',  H*W
-                
-                
-                # each_layer_supp_feat = each_layer_supp_feat.reshape(B, C, H*W)
-                
+                norm_proto = all_prototype.norm(dim=2)  # 정규화  B, shot * C',  H*W                
                 # each_layer_supp_feat: B, C, H*W 
                 # all_prototype: # (B, C', C, H*W)
                 # dot_product = torch.einsum('bchw, bcpw -> bphw', each_layer_supp_feat, all_prototype)  # 내적 연산 최적화
                 dot_product = torch.einsum('bch, bpch -> bph', query_feat, all_prototype) # batch, shot * c', h*w
                 cos_sim = dot_product / (norm_each_layer * norm_proto + 1e-8)  # 유사도 계산
 
-                # # `cos_sim_per_shot` 벡터화
-                # cos_sim_per_shot = [[] for _ in range(batch_size)]
-                # for b in range(batch_size):
-                #     cos_sim_per_shot[batch_idx[b]].append(cos_sim[b])
-                # `cos_sim_per_shot` 벡터화
                 cos_sim_per_shot = [[cos_sim[b]] for b in range(batch_size)]
-            
 
                 # 평균 유사도 계산 (벡터화)
                 cos_sim_avg = torch.stack([torch.stack(cos_list, dim=0).mean(dim=0) for cos_list in cos_sim_per_shot], dim=0)
 
                 # 최적 채널 인덱스 찾기
+                # shot +  shot * (N_clsuter) = 총 prototype 갯수 
                 best_channel_idx = cos_sim_avg.argmax(dim=1)
 
                 # 마스크 생성
                 #! 찾아낸 argmax값이 0-4 사이로 들어올때 진행하기 
                 mask_result = ( (best_channel_idx >= 0) & (best_channel_idx < self.shot) ).float() # batch, H*W
                 feature_masks.append(mask_result)
-
-
+            
             feature_masks = [fm.view(batch_size, H, W) for fm in feature_masks]
             semantic_similarity = torch.stack(feature_masks, dim=1)  # (4, 6, 37, 37)            
         
-        # semantic_similarity = self.normalize_mask(semantic_similarity) # max
-    
-            #         best_channel_idx = cos_sim.argmax(dim=0)
-            #         mask_result = (best_channel_idx==0).int()
-            #         masks.append(mask_result)
-            #     feature_masks.append(masks)
-            # semantic_similarity = torch.stack([torch.stack(f, dim=0) for f in feature_masks], dim=1)
-                #     all_prototype  all_prototype.reshape(-1, C, H*W)
-                #     supp_feat_bin_list.append(all_prototype).
-                # breakpoint()
-                # supp_feat_bin = supp_feat_bin.repeat(1, 1, each_layer_supp_feat.shape[-2], each_layer_supp_feat.shape[-1])
-                # supp_feat_bin_list.append(supp_feat_bin)
-                # supp_feat_bin_list는 len이 6, 각각은 shape이 [16, 768, 37, 37] 
-
-            # semantic similarity
-            # self.shot = 4 
-            # if self.shot == 1:
-            #     similarity2 = []
-            #     for layer_pointer in self.prior_layer_pointer:
-            #         sim = get_similarity(eval('query_feat_' + str(layer_pointer)), eval('supp_feat_' + str(layer_pointer)),
-            #         mask,
-            #         patch_size=patch_size,
-            #         conv_vit_down_sampling=conv_vit_down_sampling)
-                    
-                    
-            #         similarity2.append(sim)  # b c h w, (bn) c h w, (bn) 1 h w --> b 1 h w
-            #     semantic_similarity = torch.concat(similarity2, dim=1)
-            # else:
-            #     # [16, 1, 37, 37] 로 되어있는 걸 , [4, 4, 1, 37, 37] 로 바꿈
-            #     mask = rearrange(mask, "(b n) c h w -> b n c h w", n=self.shot)
-            #     layer_similarity = []
-            #     for idx, layer_pointer in enumerate(self.prior_layer_pointer):
-            #         # n번째 feature를 일단 뽑고 
-            #         tmp_supp_feat = rearrange(eval('supp_feat_' + str(layer_pointer)), "(b n) c h w -> b n c h w",
-            #                                 n=self.shot)
-            #         similarity2 = []
-            #         # shot에 맞춰서 그냥 각각의 similarity 랑 잰다
-            #         for i in range(self.shot):
-            #             sim = get_similarity(eval('query_feat_' + str(layer_pointer)),
-            #             tmp_supp_feat[:, i, ...],
-            #             mask=mask[:, i, ...],
-            #             patch_size=patch_size,
-            #             conv_vit_down_sampling=conv_vit_down_sampling)
-            #             similarity2.append(sim)
-
-            #         similarity2 = torch.stack(similarity2, dim=1).mean(1)
-            #         layer_similarity.append(similarity2)
-            #     mask = rearrange(mask, "b n c h w -> (b n) c h w")
-            #     semantic_similarity = torch.concat(layer_similarity, dim=1)
-
-            # # normal similarity
-            # layer_out = []
-            # for idx, layer_pointer in enumerate(self.prior_layer_pointer):
-            #     tmp_s = eval('supp_feat_' + str(layer_pointer))
-            #     tmp_q = eval('query_feat_' + str(layer_pointer))
-
-            #     abnormal_dis = get_normal_similarity(tmp_q, tmp_s, mask, self.shot, patch_size=patch_size, conv_vit_down_sampling=conv_vit_down_sampling)
-            #     layer_out.append(abnormal_dis)
-            # normal_similarity = torch.concat(layer_out, dim=1)
-            
-            # # normal_similarity : ([4, 6, 37, 37]) # -> abnormal 
-            # # semantic_similarity : ([4, 6, 37, 37]) # -> semantic
-            
-            # # normal_similarity = semantic_similarity
-            
-            
-            # # normal_similarity = self.normalize_mask(normal_similarity) # max 0.69
-            # semantic_similarity = self.normalize_mask(semantic_similarity) # max
-            # semantic_similarity = semantic_similarity > 0.5
-            
-            # self.save_image(normal_similarity[0, 0, ...], name="normal_similarity_norm_softmax_0.8.png")
-            # self.save_image(semantic_similarity[0, 0, ...], name="semantic_similarity_norm_softmax_0.8.png")
-            # breakpoint()
-
-            
-        #     each_normal_similarity = (normal_similarity.max(1)[0]).unsqueeze(1)
-            
-            
-        #     mask = rearrange(mask, "(b n) c h w -> b n c h w", n=self.shot)
-        #     mask_weight = mask.reshape(bs_q, -1).sum(1)
-        #     mask_weight = (mask_weight > 0).float()
-        #     mask = rearrange(mask, "b n c h w -> (b n) c h w")
-        # # breakpoint()
-        # # #! 들어가기 전에 query fusion 
-        # fused_query_features_list = []
-        # for idx, layer_pointer in enumerate(self.prior_layer_pointer):
-        #     tmp_s = eval('supp_feat_' + str(layer_pointer))
-        #     tmp_q = eval('query_feat_' + str(layer_pointer))
-        #     rearrage_tmp_s = rearrange(tmp_s, "(b n) c h w -> b n c h w", n=self.shot)
-        #     bs, shot, d, h, w = rearrage_tmp_s.shape
-        #     tmp_q = tmp_q.reshape(bs, d, -1).permute(0, 2, 1)
-        #     rearrage_tmp_s = rearrage_tmp_s.reshape(bs, shot, d, -1).permute(0, 2, 1, 3).reshape(bs, d, -1).permute(0, 2, 1)
-        #     l2_normalize_s = F.normalize(rearrage_tmp_s, dim=2) #0-1사이로 만듦
-        #     l2_normalize_q = F.normalize(tmp_q, dim=2)
-        #     similarity = torch.bmm(l2_normalize_q, l2_normalize_s.permute(0, 2, 1))
-        #     # sim_value = similarity.max(2)[0].unsqueeze(-1) * 0.5 # 4, 1369, 1
-        #     sim_value = similarity.max(2)[0].unsqueeze(-1)  # 4, 1369, 1
-            
-        #     # 가장 높은 similarity를 갖는 tmp_s의 인덱스 찾기
-        #     max_indices = similarity.max(2)[1]  # (bs, q_n)
-
-        #     # 인덱스를 이용하여 tmp_s에서 해당하는 값을 가져옴
-        #     selected_tmp_s = torch.gather(rearrage_tmp_s, 1, max_indices.unsqueeze(-1).expand(-1, -1, d))  # (bs, q_n, d)
-
-        #     # tmp_q를 해당 tmp_s 값으로 재구성
-        #     reconstructed_q = selected_tmp_s.clone()
-        #     new_temp_q = reconstructed_q * sim_value + tmp_q * (1 - sim_value)
-        #     # new_temp_q = reconstructed_q 
-        #     new_temp_q = new_temp_q.reshape(bs, d, h, w) # 4, 768, 37, 37, 
-        #     fused_query_features_list.append(new_temp_q)
         
-        # final_out = self.feature_recorrect(
-        #     query_features_list=query_features_list,
-        #     support_features_list=support_features_list,
-        #     supp_feat_bin_list=supp_feat_bin_list,
-        #     semantic_similarity=semantic_similarity,
-        #     normal_similarity=normal_similarity,
-        #     mask=mask,
-        #     fused_query_features_list=fused_query_features_list,
-        #     conv_vit_down_sampling=conv_vit_down_sampling
-        # )
-
-        # return final_out, mask_weight, each_normal_similarity, query_multi_scale_features, support_multi_scale_features, mask, semantic_similarity.mean()
-    
         return semantic_similarity
     
     def normalize_mask(self, mask):

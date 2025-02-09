@@ -47,7 +47,9 @@ def cluster_prototypes_Kmeans(support_feat, num_clusters=10, device='cuda'):
     support_feat = support_feat.to(device)
 
     cluster_ids_x, cluster_centers = kmeans(
-        X=support_feat, num_clusters=num_clusters, distance='euclidean', device=torch.device(device)
+        X=support_feat, num_clusters=num_clusters, distance='euclidean',
+        tqdm_flag=False,
+        device=torch.device(device)
     )
     cluster_ids_x = cluster_ids_x.to(device).long()
     cluster_centers = cluster_centers.to(device)
