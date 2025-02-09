@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from einops import rearrange
 from sklearn.cluster import DBSCAN, KMeans
 import numpy as np
-from kmeans_pytorch import kmeans
+# from kmeans_pytorch import kmeans
 def conv_down_sample_vit(mask, patch_size=14):
     conv_param = torch.ones(patch_size, patch_size).cuda()
     down_sample_mask_vit = F.conv2d(

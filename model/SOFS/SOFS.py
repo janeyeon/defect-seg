@@ -11,29 +11,35 @@ from model.SOFS.utils import Weighted_GAP, get_similarity, get_normal_similarity
 import matplotlib.pyplot as plt
 import numpy as np
 from .lora import LoRALinearLayer, LoRACompatibleLinear
-from model.SOFS.utils import cluster_prototypes_dbscan, cluster_prototypes_Kmeans
+# from model.SOFS.utils import cluster_prototypes_dbscan, cluster_prototypes_Kmeans
 #! Add new loss 
 from model.SOFS.utils import ssim_intersect_bbox_batch
+
+ 
+import time
+import cudf
+import cupy as cp
+from cuml.cluster import KMeans
 
 
 import torch.jit
 from concurrent.futures import ThreadPoolExecutor
 
-def parallel_cluster_prototypes_Kmeans(support_features, N_clusters):
-    """
-    Multi-threaded execution of cluster_prototypes_Kmeans for each batch.
-    """
-    B = len(support_features)
-    futures = []
+# def parallel_cluster_prototypes_Kmeans(support_features, N_clusters):
+#     """
+#     Multi-threaded execution of cluster_prototypes_Kmeans for each batch.
+#     """
+#     B = len(support_features)
+#     futures = []
     
-    # Use torch.jit.fork for parallel processing on GPU
-    for b in range(B):
-        futures.append(torch.jit.fork(cluster_prototypes_Kmeans, support_features[b], N_clusters))
+#     # Use torch.jit.fork for parallel processing on GPU
+#     for b in range(B):
+#         futures.append(torch.jit.fork(cluster_prototypes_Kmeans, support_features[b], N_clusters))
     
-    # Collect results
-    results = [torch.jit.wait(f) for f in futures]
+#     # Collect results
+#     results = [torch.jit.wait(f) for f in futures]
     
-    return torch.stack(results, dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
+#     return torch.stack(results, dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
 
 class SOFS(nn.Module):
     def __init__(self, cfg):
@@ -258,13 +264,35 @@ class SOFS(nn.Module):
                 normal_supp_feat = [n.view(-1, C) for n in normal_supp_feat]
 
                 #! 이 부분 갯수를 support mask 크기에 따라서 바꾸기
-                N_clusters = 10
+                N_clusters = 20
                 # 프로토타입 계산 (벡터화)
                 
                 # thread or GPU
                 # prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
                 
-                prototype_r = parallel_cluster_prototypes_Kmeans(normal_supp_feat, N_clusters)
+                # prototype_r = parallel_cluster_prototypes_Kmeans(normal_supp_feat, N_clusters)
+                
+                
+                                ##############################################
+                ############ clustering by cuml ##############
+               
+                prototype_r = []
+                for b in range(len(normal_supp_feat)):
+
+                    normal_supp_feat_cudf = cp.asarray(normal_supp_feat[b].detach().cpu().numpy())
+                    kmeans = KMeans(n_clusters=N_clusters, random_state=2025)
+
+                    kmeans.fit(normal_supp_feat_cudf)
+
+                    prototype_r.append(torch.tensor(kmeans.cluster_centers_.get(), dtype=torch.float32).to(normal_supp_feat[b].device))
+
+                prototype_r = torch.stack(prototype_r, dim=0)
+
+                # prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768
+
+                ############ clustering by cuml ##############
+                ##############################################
+
                 
                 
                 prototype_r = prototype_r.unsqueeze(-1).unsqueeze(-1).view(batch_size, -1, 768, 1, 1) # 16, N_clusters, 768, 1, 1
