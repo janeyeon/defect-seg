@@ -241,6 +241,7 @@ def epoch_validate_ss(val_loader, model, epoch, cfg, rand_seed, train_validate=F
         # if i % 100 != 0:
         #     continue
         print(i)
+        LOGGER.info(f"Start!! : {class_iou_class.keys()[i]}")
         try:
             s_input = data["support_image"]
             s_mask = data["support_mask"]
@@ -259,6 +260,7 @@ def epoch_validate_ss(val_loader, model, epoch, cfg, rand_seed, train_validate=F
             start_time = time.time()
             if current_method in ["SOFS"]:
                 output = model(s_x=s_input, s_y=s_mask, x=input)
+                LOGGER.info(f"End")
             else:
                 raise NotImplementedError
             model_time.update(time.time() - start_time)

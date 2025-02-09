@@ -15,32 +15,65 @@ def conv_down_sample_vit(mask, patch_size=14):
     return down_sample_mask_vit
 
 
+# def cluster_prototypes_Kmeans(support_feat, N_clusters=10):
+#     S, C = support_feat.shape
+#     prototypes = []
+
+#     features = support_feat.cpu().numpy()  # (1369, 768)
+
+#     # KMeans Clustering
+#     kmeans = KMeans(n_clusters=N_clusters, random_state=42, n_init=10)
+#     cluster_labels = kmeans.fit_predict(features)  # 각 feature의 클러스터 ID
+
+#     cluster_centers = []
+#     for cluster_id in range(N_clusters):
+#         cluster_points = features[cluster_labels == cluster_id]  # 해당 클러스터에 속한 feature들
+
+#         if len(cluster_points) == 0:
+#             # 만약 특정 클러스터에 속한 데이터가 없으면 KMeans 중심값을 사용
+#             cluster_centers.append(kmeans.cluster_centers_[cluster_id])
+#         else:
+#             # Weighted GAP 스타일: 클러스터 내의 feature들의 평균
+#             cluster_centers.append(cluster_points.mean(axis=0))  
+
+#     cluster_centers = torch.tensor(cluster_centers, dtype=torch.float32).to(support_feat.device)
+
+#     prototypes.append(cluster_centers)  # (N_clusters, 768)
+
+#     return torch.stack(prototypes)  # (B, N_clusters, 768)
+
+
 def cluster_prototypes_Kmeans(support_feat, N_clusters=10):
-    S, C = support_feat.shape
-    prototypes = []
+    S, C = support_feat.shape  # (1369, 768)
 
-    features = support_feat.cpu().numpy()  # (1369, 768)
+    # 데이터를 numpy로 변환 (단순 변환, 불필요한 copy 방지)
+    features = support_feat.detach().cpu().numpy()  
 
-    # KMeans Clustering
-    kmeans = KMeans(n_clusters=N_clusters, random_state=42, n_init=10)
-    cluster_labels = kmeans.fit_predict(features)  # 각 feature의 클러스터 ID
+    # KMeans 클러스터링 수행 (n_init='auto'로 최적화)
+    kmeans = KMeans(n_clusters=N_clusters, random_state=42, n_init='auto')
+    kmeans.fit(features)
 
-    cluster_centers = []
-    for cluster_id in range(N_clusters):
-        cluster_points = features[cluster_labels == cluster_id]  # 해당 클러스터에 속한 feature들
+    # 클러스터 레이블 및 중심점
+    cluster_labels = kmeans.labels_
+    cluster_centers = kmeans.cluster_centers_  # KMeans 자체 평균값
 
-        if len(cluster_points) == 0:
-            # 만약 특정 클러스터에 속한 데이터가 없으면 KMeans 중심값을 사용
-            cluster_centers.append(kmeans.cluster_centers_[cluster_id])
-        else:
-            # Weighted GAP 스타일: 클러스터 내의 feature들의 평균
-            cluster_centers.append(cluster_points.mean(axis=0))  
+    # 벡터화된 평균 계산 (각 클러스터에 속한 데이터 평균)
+    cluster_sums = np.zeros((N_clusters, C), dtype=np.float32)
+    cluster_counts = np.bincount(cluster_labels, minlength=N_clusters).reshape(-1, 1)
 
-    cluster_centers = torch.tensor(cluster_centers, dtype=torch.float32).to(support_feat.device)
+    # 클러스터별로 feature 합산 (벡터 연산 최적화)
+    np.add.at(cluster_sums, cluster_labels, features)
 
-    prototypes.append(cluster_centers)  # (N_clusters, 768)
+    # 클러스터 내 요소가 없는 경우 예외 처리 (원래 중심값 유지)
+    valid_mask = cluster_counts.squeeze() > 0  # (N_clusters,) 형태로 변경
+    cluster_sums[valid_mask] /= cluster_counts[valid_mask]  # 평균 연산
 
-    return torch.stack(prototypes)  # (B, N_clusters, 768)
+    # 텐서 변환 (최소한의 `.to()` 호출)
+    cluster_centers = torch.from_numpy(cluster_sums).to(support_feat.device)
+    
+
+    return cluster_centers  # (N_clusters, C)
+
 
 def cluster_prototypes_dbscan(support_feat, eps=0.5, min_samples=5):
     S, C = support_feat.shape

@@ -213,7 +213,7 @@ class SOFS(nn.Module):
             # support_features_list는 길이가 6 (6개의 layer), 각각의 shape은 [16, 768, 37, 37]
             # supp_feat_bin_list = []
             feature_masks = []
-            for each_layer_supp_feat in support_features_list:
+            for i, each_layer_supp_feat in enumerate(support_features_list):
                 masks = []
                 if conv_vit_down_sampling: # True
                     tmp_mask = conv_down_sample_vit(mask, patch_size=patch_size)
@@ -233,31 +233,84 @@ class SOFS(nn.Module):
                 B, C, H, W = each_layer_supp_feat.shape
                 batch_size = B//self.shot
                 cos_sim_per_shot = [[] for _ in range(batch_size)]
+                each_layer_supp_feat_reshape = each_layer_supp_feat.permute(0, 2, 3, 1).reshape(B, H*W, C)  # (B, 1369, 768)
+                mask_flat = tmp_mask.permute(0, 2, 3, 1).reshape(B, H*W).unsqueeze(-1).expand_as(each_layer_supp_feat_reshape)
+                normal_supp_feat = [each_layer_supp_feat_reshape[b][mask_flat[b] == 0] for b in range(B)] 
+                normal_supp_feat = [n.view(-1, C) for n in normal_supp_feat]
 
-                each_layer_supp_feat = each_layer_supp_feat.permute(0, 2, 3, 1).reshape(B, H*W, C)  # (B, 1369, 768)
-                mask_flat = tmp_mask.permute(0, 2, 3, 1).reshape(B, H*W).unsqueeze(-1).expand_as(each_layer_supp_feat)
-                normal_supp_feat = [each_layer_supp_feat[b][mask_flat[b] == 0] for b in range(B)] 
-                normal_supp_feat = [n.view(-1, 768) for n in normal_supp_feat]
+                # for b in range(B):
+                #     batch_idx = b//self.shot
+                #     prototype_r = cluster_prototypes_Kmeans(normal_supp_feat[b])
+                #     #prototype_r = cluster_prototypes_dbscan(normal_supp_feat[b])
+                #     supp_feat_b = supp_feat_bin[0].squeeze(1).squeeze(1).unsqueeze(0)
+                #     proto_feat_b = prototype_r.squeeze(0)
+                #     all_proto_b = torch.cat([supp_feat_b, proto_feat_b], dim=0).unsqueeze(-1).unsqueeze(-1)
+                #     all_prototype = all_proto_b.repeat(1, 1, H, W).reshape(-1, C, H*W)
+                #     cos_sim = F.cosine_similarity(
+                #         each_layer_supp_feat[b].unsqueeze(0),
+                #         all_prototype.permute(0,2,1),
+                #         dim=-1
+                #     )
+                #     cos_sim_per_shot[batch_idx].append(cos_sim)
+                # cos_sim_avg = [torch.stack(cos_list, dim=0).mean(dim=0) for cos_list in cos_sim_per_shot]  # (batch_size, C', H*W)
+                # cos_sim_avg = torch.stack(cos_sim_avg, dim=0)  # (batch_size, C', H*W)
+                # best_channel_idx = cos_sim_avg.argmax(dim=1)
+                # mask_result = (best_channel_idx==0).float()
+                # feature_masks.append(mask_result)
+                
+                
+                batch_idx = torch.arange(B, device=normal_supp_feat[0].device) // self.shot  # 벡터화된 batch index 계산
 
-                for b in range(B):
-                    batch_idx = b//self.shot
-                    prototype_r = cluster_prototypes_Kmeans(normal_supp_feat[b])
-                    #prototype_r = cluster_prototypes_dbscan(normal_supp_feat[b])
-                    supp_feat_b = supp_feat_bin[0].squeeze(1).squeeze(1).unsqueeze(0)
-                    proto_feat_b = prototype_r.squeeze(0)
-                    all_proto_b = torch.cat([supp_feat_b, proto_feat_b], dim=0).unsqueeze(-1).unsqueeze(-1)
-                    all_prototype = all_proto_b.repeat(1, 1, H, W).reshape(-1, C, H*W)
-                    cos_sim = F.cosine_similarity(
-                        each_layer_supp_feat[b].unsqueeze(0),
-                        all_prototype.permute(0,2,1),
-                        dim=-1
-                    )
-                    cos_sim_per_shot[batch_idx].append(cos_sim)
-                cos_sim_avg = [torch.stack(cos_list, dim=0).mean(dim=0) for cos_list in cos_sim_per_shot]  # (batch_size, C', H*W)
-                cos_sim_avg = torch.stack(cos_sim_avg, dim=0)  # (batch_size, C', H*W)
+                N_clusters = 5
+                # 프로토타입 계산 (벡터화)
+                prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768
+                
+                prototype_r = prototype_r.unsqueeze(-1).unsqueeze(-1).view(batch_size, -1, 768, 1, 1) # 16, N_clusters, 768, 1, 1
+                
+                # Support feature 변환 (벡터 연산 사용)
+                # supp_feat_b = supp_feat_bin[0].squeeze().squeeze(1).unsqueeze(0).expand(B, -1, -1)  # (B, C, 1) # 16, 1, 768
+                
+                supp_feat_b = supp_feat_bin.unsqueeze(1).view(batch_size, self.shot, C, 1, 1) # 16, 1, 768, 1, 1 -> 16, 10, 768
+                
+                
+                # 프로토타입과 Support feature 결합
+                all_proto_b = torch.cat([supp_feat_b, prototype_r], dim=1)  # (batch, shot * C', C, 1, 1), C' = 1 + N_clusters
+                all_prototype = all_proto_b.expand(-1, -1, -1, H, W).reshape(batch_size, -1, C, H * W)  # (batch, shot * C', C, H*W)
+                query_feat = query_features[i].view(batch_size, C, H*W) 
+
+                # 코사인 유사도 연산 최적화
+                norm_each_layer = query_feat.norm(dim=1, keepdim=True).view(batch_size, 1, H * W).repeat(1, self.shot * (1+N_clusters), 1)  # 정규화 , batch, self.shot * C', 1, H*W
+                norm_proto = all_prototype.norm(dim=2)  # 정규화  B, shot * C',  H*W
+                
+                
+                # each_layer_supp_feat = each_layer_supp_feat.reshape(B, C, H*W)
+                
+                # each_layer_supp_feat: B, C, H*W 
+                # all_prototype: # (B, C', C, H*W)
+                # dot_product = torch.einsum('bchw, bcpw -> bphw', each_layer_supp_feat, all_prototype)  # 내적 연산 최적화
+                dot_product = torch.einsum('bch, bpch -> bph', query_feat, all_prototype) # batch, shot * c', h*w
+                cos_sim = dot_product / (norm_each_layer * norm_proto + 1e-8)  # 유사도 계산
+
+                # # `cos_sim_per_shot` 벡터화
+                # cos_sim_per_shot = [[] for _ in range(batch_size)]
+                # for b in range(batch_size):
+                #     cos_sim_per_shot[batch_idx[b]].append(cos_sim[b])
+                # `cos_sim_per_shot` 벡터화
+                cos_sim_per_shot = [[cos_sim[b]] for b in range(batch_size)]
+            
+
+                # 평균 유사도 계산 (벡터화)
+                cos_sim_avg = torch.stack([torch.stack(cos_list, dim=0).mean(dim=0) for cos_list in cos_sim_per_shot], dim=0)
+
+                # 최적 채널 인덱스 찾기
                 best_channel_idx = cos_sim_avg.argmax(dim=1)
-                mask_result = (best_channel_idx==0).float()
+
+                # 마스크 생성
+                #! 찾아낸 argmax값이 0-4 사이로 들어올때 진행하기 
+                mask_result = ( (best_channel_idx >= 0) & (best_channel_idx < self.shot) ).float() # batch, H*W
                 feature_masks.append(mask_result)
+
+
             feature_masks = [fm.view(batch_size, H, W) for fm in feature_masks]
             semantic_similarity = torch.stack(feature_masks, dim=1)  # (4, 6, 37, 37)            
         
