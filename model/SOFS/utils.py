@@ -42,28 +42,29 @@ def conv_down_sample_vit(mask, patch_size=14):
 
 #     return torch.stack(prototypes)  # (B, N_clusters, 768)
 
-def cluster_prototypes_Kmeans(support_feat, num_clusters=10, device='cuda'):
-    S, C = support_feat.shape  # (1369, 768)
-    support_feat = support_feat.to(device)
+#! 지하가 올렸던게 이 버전임! 
+# def cluster_prototypes_Kmeans(support_feat, num_clusters=10, device='cuda'):
+#     S, C = support_feat.shape  # (1369, 768)
+#     support_feat = support_feat.to(device)
 
-    cluster_ids_x, cluster_centers = kmeans(
-        X=support_feat, num_clusters=num_clusters, distance='euclidean',
-        tqdm_flag=False,
-        device=torch.device(device)
-    )
-    cluster_ids_x = cluster_ids_x.to(device).long()
-    cluster_centers = cluster_centers.to(device)
+#     cluster_ids_x, cluster_centers = kmeans(
+#         X=support_feat, num_clusters=num_clusters, distance='euclidean',
+#         tqdm_flag=False,
+#         device=torch.device(device)
+#     )
+#     cluster_ids_x = cluster_ids_x.to(device).long()
+#     cluster_centers = cluster_centers.to(device)
 
-    cluster_sums = torch.zeros((num_clusters, C), device=support_feat.device)  # (num_clusters, C)
-    cluster_counts = torch.zeros((num_clusters, 1), device=support_feat.device)  # (num_clusters, 1)
+#     cluster_sums = torch.zeros((num_clusters, C), device=support_feat.device)  # (num_clusters, C)
+#     cluster_counts = torch.zeros((num_clusters, 1), device=support_feat.device)  # (num_clusters, 1)
     
-    cluster_sums.scatter_add_(0, cluster_ids_x.view(-1, 1).expand(-1, C), support_feat)
-    cluster_counts.scatter_add_(0, cluster_ids_x.view(-1, 1), torch.ones((S, 1), device=device))
+#     cluster_sums.scatter_add_(0, cluster_ids_x.view(-1, 1).expand(-1, C), support_feat)
+#     cluster_counts.scatter_add_(0, cluster_ids_x.view(-1, 1), torch.ones((S, 1), device=device))
     
-    valid_mask = cluster_counts.squeeze() > 0  # (num_clusters,)
-    cluster_sums[valid_mask] /= cluster_counts[valid_mask]
+#     valid_mask = cluster_counts.squeeze() > 0  # (num_clusters,)
+#     cluster_sums[valid_mask] /= cluster_counts[valid_mask]
     
-    return cluster_sums  # (num_clusters, C)
+#     return cluster_sums  # (num_clusters, C)
 
 # def cluster_prototypes_Kmeans(support_feat, N_clusters=10):
 #     S, C = support_feat.shape  # (1369, 768)

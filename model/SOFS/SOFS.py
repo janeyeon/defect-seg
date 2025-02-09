@@ -25,21 +25,32 @@ from cuml.cluster import KMeans
 import torch.jit
 from concurrent.futures import ThreadPoolExecutor
 
-# def parallel_cluster_prototypes_Kmeans(support_features, N_clusters):
-#     """
-#     Multi-threaded execution of cluster_prototypes_Kmeans for each batch.
-#     """
-#     B = len(support_features)
-#     futures = []
+
+def clustering_cuml_kmeans(support_features, N_clusters):
+    normal_supp_feat_cudf = cp.asarray(support_features.detach().cpu().numpy())
+    kmeans = KMeans(n_clusters=N_clusters, random_state=2025)
+
+    kmeans.fit(normal_supp_feat_cudf)
     
-#     # Use torch.jit.fork for parallel processing on GPU
-#     for b in range(B):
-#         futures.append(torch.jit.fork(cluster_prototypes_Kmeans, support_features[b], N_clusters))
+    return torch.tensor(kmeans.cluster_centers_.get(), dtype=torch.float32).to(support_features.device)
+
+
+def parallel_cluster_prototypes_Kmeans(support_features, N_clusters):
+    """
+    Multi-threaded execution of cluster_prototypes_Kmeans for each batch.
+    """
+    B = len(support_features)
+    prototype_r = []
     
-#     # Collect results
-#     results = [torch.jit.wait(f) for f in futures]
+    # Use torch.jit.fork for parallel processing on GPU
+    for b in range(B):
+        prototype_r.append(torch.jit.fork(clustering_cuml_kmeans, support_features[b], N_clusters))
     
-#     return torch.stack(results, dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
+    # Collect results
+    results = [torch.jit.wait(f) for f in prototype_r]
+    
+    return torch.stack(results, dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
+
 
 class SOFS(nn.Module):
     def __init__(self, cfg):
@@ -264,29 +275,29 @@ class SOFS(nn.Module):
                 normal_supp_feat = [n.view(-1, C) for n in normal_supp_feat]
 
                 #! 이 부분 갯수를 support mask 크기에 따라서 바꾸기
-                N_clusters = 20
+                N_clusters = 50
                 # 프로토타입 계산 (벡터화)
                 
                 # thread or GPU
                 # prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
                 
-                # prototype_r = parallel_cluster_prototypes_Kmeans(normal_supp_feat, N_clusters)
+                prototype_r = parallel_cluster_prototypes_Kmeans(normal_supp_feat, N_clusters)
                 
                 
                                 ##############################################
                 ############ clustering by cuml ##############
                
-                prototype_r = []
-                for b in range(len(normal_supp_feat)):
+                # prototype_r = []
+                # for b in range(len(normal_supp_feat)):
 
-                    normal_supp_feat_cudf = cp.asarray(normal_supp_feat[b].detach().cpu().numpy())
-                    kmeans = KMeans(n_clusters=N_clusters, random_state=2025)
+                #     normal_supp_feat_cudf = cp.asarray(normal_supp_feat[b].detach().cpu().numpy())
+                #     kmeans = KMeans(n_clusters=N_clusters, random_state=2025)
 
-                    kmeans.fit(normal_supp_feat_cudf)
+                #     kmeans.fit(normal_supp_feat_cudf)
 
-                    prototype_r.append(torch.tensor(kmeans.cluster_centers_.get(), dtype=torch.float32).to(normal_supp_feat[b].device))
+                #     prototype_r.append(torch.tensor(kmeans.cluster_centers_.get(), dtype=torch.float32).to(normal_supp_feat[b].device))
 
-                prototype_r = torch.stack(prototype_r, dim=0)
+                # prototype_r = torch.stack(prototype_r, dim=0)
 
                 # prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768
 
@@ -426,83 +437,3 @@ class SOFS(nn.Module):
 
 
         return final_out
-
-        # if self.training:
-        #     _h, _w = final_out.shape[-2:]
-        #     if conv_vit_down_sampling:
-        #         y_m_squeeze = conv_down_sample_vit(y, patch_size=patch_size).squeeze(1)
-        #     else:
-        #         y_m_squeeze = F.interpolate(y, size=(_h, _w), mode='bilinear', align_corners=False).squeeze(1)
-
-        #     y_m_squeeze = (y_m_squeeze > 0.1).float()
-        #     if self.cfg.TRAIN.SOFS.meta_cls:
-        #         final_out_prob = torch.sigmoid(final_out).contiguous()
-        #     else:
-        #         final_out_prob = torch.softmax(final_out, dim=1)[:, 1, ...].contiguous()
-
-        #     main_loss = dice_ce_loss_sum(
-        #         y_m_squeeze=y_m_squeeze,
-        #         final_out=final_out_prob,
-        #         dice_weight=self.dice_weight,
-        #         ce_weight=self.ce_weight,
-        #         smooth_r=self.cfg.TRAIN.SOFS.smooth_r
-        #     )
-            
-        #     #! Add ssim loss
-        #     # 일단 적당한 dice loss의 크기
-        #     # tensor(0.9922, device='cuda:0', grad_fn=<AddBackward0>)
-        #     # breakpoint()
-        #     # chamfer_and_ssim_loss
-        #     # y_m_squeeze : [4, 37, 37]
-        #     # final_out_prob.shape : [4, 37, 37]
-        #     # support_features_list : [4, 768, 37, 37] x 6 
-        #     # query_features_list : [4, 768, 37, 37] x 6 
-        #     # x: torch.Size([4, 3, 518, 518])
-        #     # y: torch.Size([4, 4, 3, 518, 518]) -> 이 4개의 shot중에서 뭐가 더 나은 이미지일까? 확인해봐야함
-        #     # _, _, x_h, x_w = x.shape
-        #     # query_mask_reshaped = F.interpolate(final_out_prob.unsqueeze(1), size=(x_h, x_w), mode='bilinear', align_corners=False)
-        #     # # query_mask_reshaped : [4, 1,  518, 518]
-            
-        #     # support_index = 0
-        #     # loss_weight = 0.5
-        #     # query_mask = query_mask_reshaped > 0.5
-        #     # support_mask = s_y[:, support_index, ...] > 0.5
-            
-        #     # # query_input = x 
-        #     # # support_input = s_x[:, support_index, ...]
-        #     # query_input = torch.stack(query_multi_scale_features, dim=0) # [6, 4, 1370, 768]
-        #     # support_input = torch.stack(support_multi_scale_features, dim=0) # [6, 16, 1370, 768]
-            
-        #     # ssim_loss = ssim_intersect_bbox_batch(query_input, support_input, query_mask, support_mask)
-        #     # # ssim_loss = 1 - ssim_loss
-            
-        #     # main_loss += ssim_loss * loss_weight
-            
-        #     # main_loss += (1 - sim_loss) 
-
-        #     if self.cfg.TRAIN.SOFS.meta_cls:
-        #         final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
-        #         final_out_prob = torch.sigmoid(final_out).contiguous()
-        #     else:
-        #         final_out = F.interpolate(final_out, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False)
-        #         final_out_prob = torch.softmax(final_out, dim=1)[:, 1, ...].contiguous()
-
-        #     final_out = torch.cat([1 - final_out_prob.unsqueeze(1), final_out_prob.unsqueeze(1)], dim=1)
-        #     return final_out.max(1)[1], main_loss
-        # else:
-        #     mask_weight_ = mask_weight.unsqueeze(1).unsqueeze(1)
-        #     normal_out = F.interpolate(each_normal_similarity, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
-        #     # each_normal_similarity_
-        #     if self.cfg.TRAIN.SOFS.meta_cls:
-        #         final_out = F.interpolate(final_out.unsqueeze(1), size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False).squeeze(1)
-        #         final_out_prob = torch.sigmoid(final_out).contiguous()
-        #     else:
-        #         final_out = F.interpolate(final_out, size=(img_ori_h, img_ori_w), mode='bilinear', align_corners=False)
-        #         final_out_prob = torch.softmax(final_out, dim=1)[:, 1, ...].contiguous()
-
-        #     final_out_prob = mask_weight_ * final_out_prob + (1 - mask_weight_) * normal_out
-
-        #     final_out = torch.cat([1 - final_out_prob.unsqueeze(1), final_out_prob.unsqueeze(1)], dim=1)
-        #     return final_out
-
-

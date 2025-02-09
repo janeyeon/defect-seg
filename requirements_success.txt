@@ -20,3 +20,4 @@ scipy==1.9.1
 seaborn==0.13.2
 submitit==1.5.1
 timm==0.5.4
+--extra-index-url=https://pypi.nvidia.com cuml-cu11==23.6.* 
