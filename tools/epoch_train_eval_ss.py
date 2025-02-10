@@ -12,6 +12,7 @@ import cv2
 from datasets.base_dataset_fsss import IMAGENET_MEAN, IMAGENET_STD
 from datasets.dataset_split import VISION_V1_split_train_dict, VISION_V1_split_test_dict, VISION_V1_split_train_val_dict, \
     DS_Spectrum_DS_split_test_dict
+import re
 
 LOGGER = logging.getLogger(__name__)
 
@@ -453,13 +454,27 @@ def epoch_validate_non_resize_ss(val_loader, model, epoch, cfg, rand_seed, mode=
         raise NotImplementedError
 
     test_num = 0
-
+    
+    
+    count =  {}
+    file_count = 1
     for i, data in enumerate(val_loader):
-
+        
         # if i < 100:
         #     continue        
-        if i % 11 !=0:
-            continue  
+        # if i % 11 !=0:
+        #     continue
+        
+        query_object, query_category, query_filename = data['query_object_category_filename'][0].split("^")
+        category_name = query_object + '_' + str(query_category)
+        
+        count[category_name] = count.get(category_name, 0) 
+
+        if count[category_name] < file_count:
+            # LOGGER.info(f'category_name: {category_name}')
+            count[category_name] += 1
+        else:
+            continue
         
         s_input = data["support_image"]
         s_mask = data["support_mask"]

@@ -125,7 +125,7 @@ def dinov2_vitb14_reg(*, pretrained: bool = True, weights: Union[Weights, str] =
     )
 
 
-def dinov2_vitl14_reg(*, pretrained: bool = True, weights: Union[Weights, str] = Weights.LVD142M, **kwargs):
+def dinov2_vitg14_reg(*, pretrained: bool = True, weights: Union[Weights, str] = Weights.LVD142M, **kwargs):
     """
     DINOv2 ViT-L/14 model with registers (optionally) pretrained on the LVD-142M dataset.
     """

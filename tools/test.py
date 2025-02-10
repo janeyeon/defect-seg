@@ -7,7 +7,8 @@ import traceback
 from utils import init_distributed_training, is_master_proc, seed_everything, \
     freeze_paras, get_datasets, setup_logging
 
-from model.SOFS import SOFS
+# from model.SOFS import SOFS
+# from model.SOFS import SOFS_class
 
 from tools.epoch_train_eval_ss import epoch_validate_ss, epoch_validate_non_resize_ss
 from tools.open_domain_eval import opendomain_eval
@@ -116,7 +117,9 @@ def test(cfg):
 
                 LOGGER.info("load model!")
                 if cfg.TEST.method == "SOFS":
-                    model = SOFS(cfg=cfg)
+                    from model.SOFS import SOFS_class
+
+                    model = SOFS_class(cfg=cfg)
                 else:
                     raise NotImplementedError("test method is not in the target list!")
 

@@ -36,7 +36,8 @@ TRAIN:
   method: 'SOFS'
   dataset_path: './Open_Domain_Data'
 
-  backbone: 'dinov2_vitb14'
+  # backbone: 'dinov2_vitb14'
+  backbone: 'dinov2_vitg14_reg'
   backbone_load_state_dict: True
   backbone_checkpoint: '/home/zzl/desktop/2023/ss_as/dinov2_vitb14_pretrain.pth'
 

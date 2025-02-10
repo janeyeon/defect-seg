@@ -231,7 +231,7 @@ def dinov2_vitb14_reg_lc(
     )
 
 
-def dinov2_vitl14_reg_lc(
+def dinov2_vitg14_reg_lc(
     *, layers: int = 4, pretrained: bool = True, weights: Union[Weights, str] = Weights.IMAGENET1K, **kwargs
 ):
     """

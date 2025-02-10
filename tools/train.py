@@ -11,7 +11,9 @@ import traceback
 from utils import init_distributed_training, is_master_proc, seed_everything, \
     get_datasets, setup_logging
 
-from model.SOFS import SOFS
+# from model.SOFS import SOFS
+
+# from model.SOFS.SOFS import SOFS
 
 from tools.epoch_train_eval_ss import epoch_train_ss, epoch_validate_ss, epoch_validate_non_resize_ss
 
@@ -133,7 +135,8 @@ def train(cfg):
 
             LOGGER.info("load model!")
             if cfg.TRAIN.method == "SOFS":
-                model = SOFS(cfg=cfg)
+                from model.SOFS import SOFS_class
+                model = SOFS_class(cfg=cfg)
             else:
                 raise NotImplementedError("train method is not in the target list!")
 

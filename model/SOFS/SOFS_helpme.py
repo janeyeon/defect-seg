@@ -52,9 +52,9 @@ def parallel_cluster_prototypes_Kmeans(support_features, N_clusters):
     return torch.stack(results, dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
 
 
-class SOFS_class(nn.Module):
+class SOFS(nn.Module):
     def __init__(self, cfg):
-        super(SOFS_class, self).__init__()
+        super(SOFS, self).__init__()
 
         if cfg.DATASET.name in ["VISION_V1_ND", "DS_Spectrum_DS_ND", "opendomain_test_dataset_ND", 'ECCV_Contest_ND', "ECCV_Contest_Test_ND"]:
             shot = cfg.DATASET.shot * cfg.DATASET.s_in_shot

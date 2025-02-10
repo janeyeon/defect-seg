@@ -52,6 +52,7 @@ _BACKBONES = {
     "dinov2_vitb14": "dinov2_vitb14(pretrained=False)",
     "dinov2_vitl14": "dinov2_vitl14(pretrained=False)",
     "antialiased_wide_resnet50_2": "antialiased_cnns.wide_resnet50_2(pretrained=True)",
+    "dinov2_vitg14_reg": "dinov2_vitg14_reg(pretrained=False)",
 }
 
 

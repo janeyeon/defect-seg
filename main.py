@@ -12,7 +12,20 @@ from tools import train, test
 
 LOGGER = logging.getLogger(__name__)
 
+import random
+import numpy as np
+import torch
+import os
 
+def set_seed(seed=42):
+    random.seed(seed)  # Python의 random 모듈 시드 설정
+    np.random.seed(seed)  # NumPy 시드 설정
+    torch.manual_seed(seed)  # PyTorch 시드 설정
+    torch.cuda.manual_seed(seed)  # CUDA 사용 시 추가 시드 설정
+    torch.cuda.manual_seed_all(seed)  # 멀티 GPU 사용 시 모든 GPU에 시드 설정
+    torch.backends.cudnn.deterministic = True  # CuDNN의 Deterministic 모드 설정
+    torch.backends.cudnn.benchmark = False  # CuDNN의 벤치마크 모드 비활성화
+    os.environ['PYTHONHASHSEED'] = str(seed)  # 해시 시드 설정
 
 def main():
     args = parse_args()
@@ -21,7 +34,7 @@ def main():
     for path_to_config in args.cfg_files:
         # merge config and args, mkdir image_save and checkpoints
         cfg = load_config(args, path_to_config=path_to_config)
-
+        
         # Perform training and test in each category.
         if cfg.TRAIN.enable:
             """
@@ -41,4 +54,5 @@ def main():
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
+    set_seed(seed=42)
     main()

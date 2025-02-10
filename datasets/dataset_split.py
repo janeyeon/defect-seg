@@ -25,17 +25,17 @@ VISION_V1_split_train_val_dict = {
 # }
 
 #! 이게 원본입니다용! 
-# VISION_V1_split_test_dict = {
-#     "split_0": ["PCB_1", "Hemisphere", "Wood", "Ring", "Cable"],
-#     "split_1": ["Casting", "Capacitor", "PCB_2", "Electronics", "Console"],
-#     "split_2": ["Groove", "Lens", "Screw", "Cylinder"],
-# }
-
 VISION_V1_split_test_dict = {
-    "split_0": [ "Ring", "Cable","PCB_1","Hemisphere","Wood"],
+    "split_0": ["PCB_1", "Hemisphere", "Wood", "Ring", "Cable"],
     "split_1": ["Casting", "Capacitor", "PCB_2", "Electronics", "Console"],
     "split_2": ["Groove", "Lens", "Screw", "Cylinder"],
 }
+
+# VISION_V1_split_test_dict = {
+#     "split_0": [ "Ring", "Cable","PCB_1","Hemisphere","Wood"],
+#     "split_1": ["Casting", "Capacitor", "PCB_2", "Electronics", "Console"],
+#     "split_2": ["Groove", "Lens", "Screw", "Cylinder"],
+# }
 
 DS_Spectrum_DS_split_test_dict = {
     "split_0": [
