@@ -461,16 +461,16 @@ def epoch_validate_non_resize_ss(val_loader, model, epoch, cfg, rand_seed, mode=
     for i, data in enumerate(val_loader):
         
 
-        query_object, query_category, query_filename = data['query_object_category_filename'][0].split("^")
-        category_name = query_object + '_' + str(query_category)
+        # query_object, query_category, query_filename = data['query_object_category_filename'][0].split("^")
+        # category_name = query_object + '_' + str(query_category)
         
-        count[category_name] = count.get(category_name, 0) 
+        # count[category_name] = count.get(category_name, 0) 
 
-        if count[category_name] < file_count:
-            # LOGGER.info(f'category_name: {category_name}')
-            count[category_name] += 1
-        else:
-            continue
+        # if count[category_name] < file_count:
+        #     # LOGGER.info(f'category_name: {category_name}')
+        #     count[category_name] += 1
+        # else:
+        #     continue
         
         s_input = data["support_image"]
         s_mask = data["support_mask"]
