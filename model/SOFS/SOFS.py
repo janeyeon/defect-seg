@@ -278,48 +278,21 @@ class SOFS(nn.Module):
                 cos_sim_per_shot = [[] for _ in range(batch_size)]
                 each_layer_supp_feat_reshape = each_layer_supp_feat.permute(0, 2, 3, 1).reshape(B, H*W, C)  # (B, 1369, 768)
                 mask_flat = tmp_mask.permute(0, 2, 3, 1).reshape(B, H*W).unsqueeze(-1).expand_as(each_layer_supp_feat_reshape)
-                normal_supp_feat_nd = [each_layer_supp_feat_reshape[b][mask_flat[b] == 0] for b in range(B)] 
-                normal_supp_feat_nd = [n.view(-1, C) for n in normal_supp_feat_nd]
-                
-                normal_supp_feat_d = [each_layer_supp_feat_reshape[b][mask_flat[b] != 0] for b in range(B)] 
-                normal_supp_feat_d = [n.view(-1, C) for n in normal_supp_feat_d]
+                normal_supp_feat = [each_layer_supp_feat_reshape[b][mask_flat[b] == 0] for b in range(B)] 
+                normal_supp_feat = [n.view(-1, C) for n in normal_supp_feat]
 
                 #! 이 부분 갯수를 support mask 크기에 따라서 바꾸기
                 N_clusters = 50
+                # 프로토타입 계산 (벡터화)
                 
-                prototype_r = parallel_cluster_prototypes_Kmeans(normal_supp_feat_nd, N_clusters)
+                # thread or GPU
+                # prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
                 
-                
-                
-                
-                # support_ratio = mask_flat.mean() # 전체 마스크중 defect 마스크가 가지고 있는 비율 
-                # # LOGGER.info(f"support_ratio: {support_ratio}")
-                
-                
-                # # N_clusters_d = int(40 * (support_ratio - 0.001) ** 2) + 1 # 대충 0.001에서 0값, 0.5에서 20정도 값을 가지도록 설계해놓은 함수 
-                # N_clusters_d = 2 # 대충 0.001에서 0값, 0.5에서 20정도 값을 가지도록 설계해놓은 함수 
-                # N_clusters_nd = N_clusters - N_clusters_d
-                # # 프로토타입 계산 (벡터화)
-                
-                # # thread or GPU
-                # # prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
-                # # normal_supp_feat_nd = torch.where(~mask_flat, normal_supp_feat, 0)
-                # # normal_supp_feat_d = torch.where(mask_flat, normal_supp_feat, 0)
-                
-                
-                
-                # prototype_nd = parallel_cluster_prototypes_Kmeans(normal_supp_feat_nd, N_clusters_nd)
-                
-                # prototype_d = parallel_cluster_prototypes_Kmeans(normal_supp_feat_d, N_clusters_d)
-
-                
-                # prototype_r = torch.cat((prototype_d, prototype_nd), dim=1) # 16, N_clusters, 768 
-                
-                
-                
-                # #############################################
-                # ########### clustering by cuml ##############
-                
+                prototype_r = parallel_cluster_prototypes_Kmeans(normal_supp_feat, N_clusters)
+                                
+                ##############################################
+                ############ clustering by cuml ##############
+               
                 # prototype_r = []
                 # for b in range(len(normal_supp_feat)):
 
@@ -334,8 +307,8 @@ class SOFS(nn.Module):
 
                 # prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768
 
-                # ############ clustering by cuml ##############
-                # ##############################################
+                ############ clustering by cuml ##############
+                ##############################################
 
                 
                 
@@ -348,6 +321,199 @@ class SOFS(nn.Module):
                 all_proto_b = torch.cat([supp_feat_b, prototype_r], dim=1)  # (batch, shot * C', C, 1, 1), C' = 1 + N_clusters
                 all_prototype = all_proto_b.expand(-1, -1, -1, H, W).reshape(batch_size, -1, C, H * W)  # (batch, shot * C', C, H*W)
                 query_feat = query_features[i].view(batch_size, C, H*W) 
+                
+                
+
+                ##########################################################
+                ####################### apply cdam #######################
+
+                ## options for cdam ##
+                
+                do_cdam = True
+                
+                minmax1 = True
+                minmax2 = False
+                multi_scale = False
+
+                T = 0.1 # 0.1 # 0.2 for voc
+                P = 0.1 #[0.1,0.1,0.1,0.1] # 0.1
+                cdam_coef = 0.1
+
+                device = query_feat.device
+                
+                bs_s, d, h, w = each_layer_supp_feat.shape
+                bs, _, _ = query_feat.shape
+                hw_shape = (h, w)
+
+
+
+
+                q_x_norm = query_feat / query_feat.norm(dim=-1, keepdim=True)
+                q_x_norm = q_x_norm.permute(0,2,1)
+                q_x_norm = q_x_norm.unsqueeze(1)
+
+
+                _,ts,_,_,_ = all_proto_b.size()
+                s_x = all_proto_b.reshape(bs,1,ts,d)
+                s_x_norm = s_x / s_x.norm(dim=-1, keepdim=True)
+                shots = s_x_norm.size(1)
+
+                ### from cdam ###
+                logits = q_x_norm @ s_x_norm.permute(0,1,3,2) # bs x (bs_s//bs) x t1 x t2
+                out_dim = logits.shape[-1]
+                
+                logits = logits.permute(0, 1, 3, 2).reshape(bs, shots, out_dim, h, w)
+
+                logits_no_inter = logits.clone()
+            
+                logits_sm = F.softmax(logits_no_inter/T, dim=2)
+                
+                bs, _, c, w_attn, h_attn = logits_sm.shape
+            
+                logits_flatten = logits_sm.reshape(bs, shots, c,-1) # 50 196
+                ######
+
+                #original size
+                softmax_temp = nn.Softmax(dim=3)
+                p_temp = logits_flatten.unsqueeze(4).expand(bs, shots, c, w_attn * h_attn, w_attn * h_attn)
+                q_temp = logits_flatten.unsqueeze(3).expand(bs, shots, c, w_attn * h_attn, w_attn * h_attn)
+                
+                M = (p_temp+q_temp) * 0.5
+
+                # #jhonson
+                kl_temp =0.5 * (torch.sum(logits_flatten.unsqueeze(4) *  (torch.log(p_temp + 1e-8) - torch.log(M + 1e-8)), dim=2) + \
+                                torch.sum(logits_flatten.unsqueeze(3) *  (torch.log(q_temp + 1e-8) - torch.log(M + 1e-8)), dim=2))
+                
+                kl_temp = 1 - kl_temp # bs x t x t
+
+                
+
+                ### minmax_norm 1 ###
+                if minmax1:
+                    min_vals = kl_temp.min(dim=-1, keepdim=True)[0].expand(bs, shots, w_attn * h_attn, w_attn * h_attn)  # Find minimum values along dim=2, keep dimensions
+                    max_vals = kl_temp.max(dim=-1, keepdim=True)[0].expand(bs, shots, w_attn * h_attn, w_attn * h_attn)  # Find maximum values along dim=2, keep dimensions
+                    kl_temp = (kl_temp - min_vals) / (max_vals - min_vals + 1e-8)
+
+                kl_temp_ori_soft = softmax_temp(kl_temp/P) 
+                
+                ### minmax_norm 2 ###
+                if minmax2:
+                    min_vals = kl_temp_ori_soft.min(dim=-1, keepdim=True)[0].expand(bs, shots, w_attn * h_attn, w_attn * h_attn)  # Find minimum values along dim=2, keep dimensions
+                    max_vals = kl_temp_ori_soft.max(dim=-1, keepdim=True)[0].expand(bs, shots, w_attn * h_attn, w_attn * h_attn)  # Find maximum values along dim=2, keep dimensions
+                    kl_temp_ori = (kl_temp_ori_soft - min_vals) / (max_vals - min_vals + 1e-8)
+                else:
+                    kl_temp_ori = kl_temp_ori_soft
+
+                ### multi-scale version ###
+                
+                # print(logits_sm.shape)
+                # print(q_x.shape)
+
+                if not multi_scale:
+                    js_attn_map = kl_temp_ori.mean(dim=1)
+            
+                else:
+                    kl_temp_weight = torch.zeros(bs, shots, 12, w*h, w*h, dtype=torch.float16).to(device) 
+                    
+                    # logits_no_inter_clone = logits_no_inter.clone()
+
+                    step = 0
+                    attn_list = []
+                    
+                    bs, shots, c, w_attn, h_attn = logits_sm.shape
+
+                    kl_sizes = [0.5, 0.65, 0.8]    ############## reduce scales    
+                    kl_size_w = [int(w_attn*size) for size in kl_sizes]
+                    kl_size_h = [int(h_attn*size) for size in kl_sizes]
+                    
+
+                    reshaped_image_features = q_x.permute(0, 2, 1).reshape(1, -1, w, h) #[1, 256, 28, 28]
+                
+                    for k_w, k_h in zip(kl_size_w, kl_size_h):
+                        # logits_no_inter = nn.functional.interpolate(logits_no_inter_clone, size=(k_w,k_h), mode='bilinear')
+                        
+                        image_features_no_inter = nn.functional.interpolate(reshaped_image_features, size=(k_w,k_h), mode='bilinear') #[1, 256, k_w, k_h]
+
+                        image_features_no_inter = image_features_no_inter.reshape(1, -1, k_w*k_h).permute(0,2,1)
+
+                        q_x_norm = image_features_no_inter / image_features_no_inter.norm(dim=-1, keepdim=True)
+                        q_x_norm = q_x_norm.unsqueeze(1)
+                        
+
+                        ### from cdam ###
+                        logits = q_x_norm @ s_x_norm.permute(0,1,3,2) # bs x (bs_s//bs) x t1 x t2
+                        out_dim = logits.shape[-1]
+                        
+                        logits = logits.permute(0, 1, 3, 2).reshape(bs, shots, out_dim, k_h, k_w)
+
+                        logits_no_inter = logits.clone()
+                        logits_sm = F.softmax(logits_no_inter/T, dim=2)
+                        
+                        logits_flatten = logits_sm.reshape(bs, shots, c,-1) # 50 196
+                        ######
+
+                        #original size
+                        softmax_temp = nn.Softmax(dim=3)
+                        p_temp = logits_flatten.unsqueeze(4).expand(bs, shots, c, k_h * k_w, k_h * k_w)
+                        q_temp = logits_flatten.unsqueeze(3).expand(bs, shots, c, k_h * k_w, k_h * k_w)
+                        
+                        
+                        M = (p_temp+q_temp) * 0.5
+                        
+
+                        # #jhonson
+                        kl_temp =0.5 * (torch.sum(logits_flatten.unsqueeze(4) *  (torch.log(p_temp + 1e-8) - torch.log(M + 1e-8)), dim=2) + \
+                                        torch.sum(logits_flatten.unsqueeze(3) *  (torch.log(q_temp + 1e-8) - torch.log(M + 1e-8)), dim=2))
+                        
+                        kl_temp = 1 - kl_temp # bs x t x t
+
+                        kl_temp_up = torch.zeros(bs, shots, w_attn*h_attn, w_attn*h_attn, dtype=torch.float16).to(device) # (1,1,37^2, 37^2)
+
+                        kl_temp = nn.functional.interpolate(kl_temp.reshape(bs*shots, k_h*k_w, k_h, k_w), size=(w,h), mode='bilinear') #1 100 14 14
+                        for shot in range(shots):
+                            for i in range(bs):
+                                kl_temp_samp = kl_temp[(shot+1)*i].permute(1,2,0).reshape(w,h,k_w,k_h) # 100 14 14 -> 14 14 10 10
+                                kl_temp_samp = nn.functional.interpolate(kl_temp_samp, size=(w,h), mode='bilinear') # 14 14 14 14
+                                kl_temp_samp = kl_temp_samp.permute(2,3,0,1).reshape(w*h,w , h).reshape(w*h,w*h)
+
+                                kl_temp_up[i, shot] = kl_temp_samp
+                        kl_temp = kl_temp_up
+
+
+                        ### minmax_norm 1 ###
+                        if minmax1:
+                            min_vals = kl_temp.min(dim=-1, keepdim=True)[0].expand(bs, shots, w*h, w*h)  # Find minimum values along dim=2, keep dimensions
+                            max_vals = kl_temp.max(dim=-1, keepdim=True)[0].expand(bs, shots, w*h, w*h)  # Find maximum values along dim=2, keep dimensions
+                            kl_temp = (kl_temp - min_vals) / (max_vals - min_vals + 1e-8)
+
+                        kl_temp_1_soft = softmax_temp(kl_temp/P) 
+                        
+                        ### minmax_norm 2 ###
+                        if minmax2:
+                            min_vals = kl_temp_1_soft.min(dim=-1, keepdim=True)[0].expand(bs, shots, w*h, w*h)  # Find minimum values along dim=2, keep dimensions
+                            max_vals = kl_temp_1_soft.max(dim=-1, keepdim=True)[0].expand(bs, shots, w*h, w*h) # Find maximum values along dim=2, keep dimensions
+                            kl_temp_1 = (kl_temp_1_soft - min_vals) / (max_vals - min_vals + 1e-8)
+                        else:
+                            kl_temp_1 = kl_temp_1_soft
+
+                        attn_list.append(kl_temp_1)
+
+                    js_attn_map = ((torch.stack(attn_list, dim=0).sum(0) +1.0*kl_temp_ori ) / (len(kl_size_w) + 1.0)).mean(dim=1) 
+
+                q_js_attn = torch.bmm(js_attn_map, query_feat.permute(0,2,1)).permute(0,2,1)
+                query_feat = query_feat + cdam_coef * q_js_attn
+
+                ####################### apply cdam #######################
+                ##########################################################
+
+                
+                
+                
+                
+
+
+
+
                 # 코사인 유사도 연산 최적화
                 norm_each_layer = query_feat.norm(dim=1, keepdim=True).view(batch_size, 1, H * W).repeat(1, self.shot * (1+N_clusters), 1)  # 정규화 , batch, self.shot * C', 1, H*W
                 norm_proto = all_prototype.norm(dim=2)  # 정규화  B, shot * C',  H*W                
@@ -368,12 +534,12 @@ class SOFS(nn.Module):
 
                 # 마스크 생성
                 #! 찾아낸 argmax값이 0-4 사이로 들어올때 진행하기 
-                mask_result = ( (best_channel_idx >= 0) & (best_channel_idx < self.shot * (1+N_clusters)) ).float() # batch, H*W
-                # mask_result = ( (best_channel_idx >= 0) & (best_channel_idx < self.shot * (1+N_clusters_d)) ).float() # batch, H*W
+                mask_result = ( (best_channel_idx >= 0) & (best_channel_idx < self.shot) ).float() # batch, H*W
                 feature_masks.append(mask_result)
             
             feature_masks = [fm.view(batch_size, H, W) for fm in feature_masks]
             semantic_similarity = torch.stack(feature_masks, dim=1)  # (4, 6, 37, 37)            
+               
         
         
         return semantic_similarity
