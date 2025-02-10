@@ -24,7 +24,7 @@ from cuml.cluster import KMeans
 
 import torch.jit
 from concurrent.futures import ThreadPoolExecutor
-
+from tools.epoch_train_eval_ss import LOGGER
 
 def clustering_cuml_kmeans(support_features, N_clusters):
     normal_supp_feat_cudf = cp.asarray(support_features.detach().cpu().numpy())
@@ -48,6 +48,13 @@ def parallel_cluster_prototypes_Kmeans(support_features, N_clusters):
     
     # Collect results
     results = [torch.jit.wait(f) for f in prototype_r]
+    
+    # Use torch.jit.fork for parallel processing on GPU
+    # for b in range(B):
+    #     prototype_r.append(clustering_cuml_kmeans(support_features[b], N_clusters))
+    
+    # # Collect results
+    # results = prototype_r
     
     return torch.stack(results, dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
 
@@ -271,22 +278,48 @@ class SOFS(nn.Module):
                 cos_sim_per_shot = [[] for _ in range(batch_size)]
                 each_layer_supp_feat_reshape = each_layer_supp_feat.permute(0, 2, 3, 1).reshape(B, H*W, C)  # (B, 1369, 768)
                 mask_flat = tmp_mask.permute(0, 2, 3, 1).reshape(B, H*W).unsqueeze(-1).expand_as(each_layer_supp_feat_reshape)
-                normal_supp_feat = [each_layer_supp_feat_reshape[b][mask_flat[b] == 0] for b in range(B)] 
-                normal_supp_feat = [n.view(-1, C) for n in normal_supp_feat]
+                normal_supp_feat_nd = [each_layer_supp_feat_reshape[b][mask_flat[b] == 0] for b in range(B)] 
+                normal_supp_feat_nd = [n.view(-1, C) for n in normal_supp_feat_nd]
+                
+                normal_supp_feat_d = [each_layer_supp_feat_reshape[b][mask_flat[b] != 0] for b in range(B)] 
+                normal_supp_feat_d = [n.view(-1, C) for n in normal_supp_feat_d]
 
                 #! 이 부분 갯수를 support mask 크기에 따라서 바꾸기
                 N_clusters = 50
-                # 프로토타입 계산 (벡터화)
                 
-                # thread or GPU
-                # prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
-                
-                prototype_r = parallel_cluster_prototypes_Kmeans(normal_supp_feat, N_clusters)
+                prototype_r = parallel_cluster_prototypes_Kmeans(normal_supp_feat_nd, N_clusters)
                 
                 
-                                ##############################################
-                ############ clustering by cuml ##############
-               
+                
+                
+                # support_ratio = mask_flat.mean() # 전체 마스크중 defect 마스크가 가지고 있는 비율 
+                # # LOGGER.info(f"support_ratio: {support_ratio}")
+                
+                
+                # # N_clusters_d = int(40 * (support_ratio - 0.001) ** 2) + 1 # 대충 0.001에서 0값, 0.5에서 20정도 값을 가지도록 설계해놓은 함수 
+                # N_clusters_d = 2 # 대충 0.001에서 0값, 0.5에서 20정도 값을 가지도록 설계해놓은 함수 
+                # N_clusters_nd = N_clusters - N_clusters_d
+                # # 프로토타입 계산 (벡터화)
+                
+                # # thread or GPU
+                # # prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
+                # # normal_supp_feat_nd = torch.where(~mask_flat, normal_supp_feat, 0)
+                # # normal_supp_feat_d = torch.where(mask_flat, normal_supp_feat, 0)
+                
+                
+                
+                # prototype_nd = parallel_cluster_prototypes_Kmeans(normal_supp_feat_nd, N_clusters_nd)
+                
+                # prototype_d = parallel_cluster_prototypes_Kmeans(normal_supp_feat_d, N_clusters_d)
+
+                
+                # prototype_r = torch.cat((prototype_d, prototype_nd), dim=1) # 16, N_clusters, 768 
+                
+                
+                
+                # #############################################
+                # ########### clustering by cuml ##############
+                
                 # prototype_r = []
                 # for b in range(len(normal_supp_feat)):
 
@@ -301,8 +334,8 @@ class SOFS(nn.Module):
 
                 # prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768
 
-                ############ clustering by cuml ##############
-                ##############################################
+                # ############ clustering by cuml ##############
+                # ##############################################
 
                 
                 
@@ -335,7 +368,8 @@ class SOFS(nn.Module):
 
                 # 마스크 생성
                 #! 찾아낸 argmax값이 0-4 사이로 들어올때 진행하기 
-                mask_result = ( (best_channel_idx >= 0) & (best_channel_idx < self.shot) ).float() # batch, H*W
+                mask_result = ( (best_channel_idx >= 0) & (best_channel_idx < self.shot * (1+N_clusters)) ).float() # batch, H*W
+                # mask_result = ( (best_channel_idx >= 0) & (best_channel_idx < self.shot * (1+N_clusters_d)) ).float() # batch, H*W
                 feature_masks.append(mask_result)
             
             feature_masks = [fm.view(batch_size, H, W) for fm in feature_masks]

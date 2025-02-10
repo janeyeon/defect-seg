@@ -456,8 +456,10 @@ def epoch_validate_non_resize_ss(val_loader, model, epoch, cfg, rand_seed, mode=
 
     for i, data in enumerate(val_loader):
 
-        # if i % 100 != 0:
+        # if i < 100:
         #     continue        
+        if i % 11 !=0:
+            continue  
         
         s_input = data["support_image"]
         s_mask = data["support_mask"]

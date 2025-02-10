@@ -20,7 +20,6 @@ def get_datasets(cfg, mode='train'):
     datasets_list = []
     dataset_info = _DATASETS[cfg.DATASET.name]
     dataset_library = __import__(dataset_info[0], fromlist=[dataset_info[1]])
-
     if mode == "train":
         dataset = dataset_library.__dict__[dataset_info[1]](
             cfg=cfg,

@@ -17,8 +17,22 @@ VISION_V1_split_train_val_dict = {
                 'Ring'],
 }
 
+# VISION_V1_split_train_val_dict = {
+#     "split_0": ['Console', 'Casting', 'Groove', 'Capacitor', 'PCB_2', 'Screw', 'Cylinder', 'Electronics', 'Lens'],
+#     "split_1": ['Ring', 'Wood', 'Screw', 'Cylinder',  'Hemisphere',  'Lens', 'PCB_1', 'Groove', 'Cable' ],
+#     "split_2": ['Console', 'PCB_1', 'Casting', 'Cable', 'Hemisphere', 'Capacitor', 'PCB_2', 'Wood', 'Electronics',
+#                 'Ring'],
+# }
+
+#! 이게 원본입니다용! 
+# VISION_V1_split_test_dict = {
+#     "split_0": ["PCB_1", "Hemisphere", "Wood", "Ring", "Cable"],
+#     "split_1": ["Casting", "Capacitor", "PCB_2", "Electronics", "Console"],
+#     "split_2": ["Groove", "Lens", "Screw", "Cylinder"],
+# }
+
 VISION_V1_split_test_dict = {
-    "split_0": ["PCB_1", "Hemisphere", "Wood", "Ring", "Cable"],
+    "split_0": [ "Ring", "Cable","PCB_1","Hemisphere","Wood"],
     "split_1": ["Casting", "Capacitor", "PCB_2", "Electronics", "Console"],
     "split_2": ["Groove", "Lens", "Screw", "Cylinder"],
 }
