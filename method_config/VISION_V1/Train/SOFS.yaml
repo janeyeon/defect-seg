@@ -32,11 +32,11 @@ TRAIN:
   method: 'SOFS'
   dataset_path: '../data/Vision_v1'
 
-  # backbone: 'dinov2_vitb14'
-  backbone: 'dinov2_vitg14_reg'
+  backbone: 'dinov2_vitb14'
+  # backbone: 'dinov2_vitg14_reg'
   backbone_load_state_dict: True
-  # backbone_checkpoint: './backbones/dinov2_vitb14_pretrain.pth'
-  backbone_checkpoint: './backbones/dinov2_vitg14_reg4_pretrain.pth'
+  backbone_checkpoint: './backbones/dinov2_vitb14_pretrain.pth'
+  # backbone_checkpoint: './backbones/dinov2_vitg14_reg4_pretrain.pth'
 
   load_checkpoint: False
   load_model_path: "./"

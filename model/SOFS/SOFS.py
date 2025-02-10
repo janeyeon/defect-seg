@@ -143,7 +143,10 @@ class SOFS_class(nn.Module):
     
     def feature_processing_vit(self, features, mask=None):
         #! 이거 주의
-        diff = 1374-1369 # 5
+        if self.cfg.TRAIN.backbone in ["dinov2_vitg14_reg"]:
+            diff = 1374-1369 # 5
+        else:
+            diff = 1
         B, L, C = features[0][:, diff:, :].shape
         h = w = int(math.sqrt(L))
         # breakpoint()
@@ -330,7 +333,7 @@ class SOFS_class(nn.Module):
                 # ####################### apply cdam #######################
 
                 ## options for cdam ##
-                CDAM = False
+                CDAM = True
                 if CDAM: 
                     do_cdam = True
                     
@@ -340,6 +343,7 @@ class SOFS_class(nn.Module):
 
                     T = 0.1 # 0.1 # 0.2 for voc
                     P = 0.1 #[0.1,0.1,0.1,0.1] # 0.1
+                    # cdam_coef = 1.0
                     cdam_coef = 1.0
 
                     device = query_feat.device
@@ -502,6 +506,7 @@ class SOFS_class(nn.Module):
 
                     q_js_attn = torch.bmm(js_attn_map, query_feat.permute(0,2,1)).permute(0,2,1)
                     query_feat = query_feat + cdam_coef * q_js_attn
+                    # query_feat =  q_js_attn
                     # query_feat =  q_js_attn * 0.5 + q_js_attn * 0.5
 
                 # ####################### apply cdam #######################

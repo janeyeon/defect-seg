@@ -457,14 +457,10 @@ def epoch_validate_non_resize_ss(val_loader, model, epoch, cfg, rand_seed, mode=
     
     
     count =  {}
-    file_count = 1
+    file_count = 10
     for i, data in enumerate(val_loader):
         
-        # if i < 100:
-        #     continue        
-        # if i % 11 !=0:
-        #     continue
-        
+
         query_object, query_category, query_filename = data['query_object_category_filename'][0].split("^")
         category_name = query_object + '_' + str(query_category)
         
