@@ -10,7 +10,7 @@ DATASET:
   rotate_max: 10
 
   area_resize_ratio: 0.01
-  crop_size: 600
+  crop_size: 518
   crop_ratio: [ 1.0, 1.0 ]
 
   test_sample_repeated_multiple: 1

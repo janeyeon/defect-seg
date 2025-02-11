@@ -343,8 +343,8 @@ class SOFS_class(nn.Module):
 
                     T = 0.1 # 0.1 # 0.2 for voc
                     P = 0.1 #[0.1,0.1,0.1,0.1] # 0.1
-                    # cdam_coef = 1.0
-                    cdam_coef = 1.0
+                    cdam_coef = 0.5
+                    # cdam_coef = 0.1
 
                     device = query_feat.device
                     
