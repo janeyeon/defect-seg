@@ -30,7 +30,7 @@ TRAIN:
   enable: True
   save_model: False
   method: 'SOFS'
-  dataset_path: '../data/Vision_v1'
+  dataset_path: '/home/khy5630/DefectSeg-khy5630/data/Vision_v1'
 
   backbone: 'dinov2_vitb14'
   # backbone: 'dinov2_vitg14_reg'
@@ -82,12 +82,12 @@ TRAIN_SETUPS:
 TEST:
   enable: False
   method: 'SOFS'
-  dataset_path: '../data/Vision_v1'
+  dataset_path: '/home/khy5630/DefectSeg-khy5630/data/Vision_v1'
   load_checkpoint: False
   load_model_path: "./save_model"
 
   VISUALIZE:
-    save_figure: False
+    save_figure: True
     sample_prob: 0.2
 
 TEST_SETUPS:

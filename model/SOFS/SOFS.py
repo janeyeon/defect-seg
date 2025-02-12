@@ -25,6 +25,85 @@ from main import set_seed
 import torch.jit
 from concurrent.futures import ThreadPoolExecutor
 
+from einops import rearrange
+
+from cuml.decomposition import PCA 
+
+from tools.epoch_train_eval_ss import LOGGER
+
+
+# def extract_pca_prototypes_gpu(feature_maps, n_components=70, shot=4):
+#     """
+#     Extracts prototypes from feature maps using GPU-accelerated PCA (cuML).
+
+#     Args:
+#         feature_maps (torch.Tensor): Tensor of shape (B, H*W, C), where B=batch size.
+#         n_components (int): Number of principal components to retain.
+
+#     Returns:
+#         torch.Tensor: Tensor of shape (B, n_components, C).
+#     """
+#     device = feature_maps[0].device
+#     dtype = feature_maps[0].dtype
+
+#     prototypes = []
+    
+    
+
+#     # for i in range(len(feature_maps)):
+#     #     features = feature_maps[i]  # (H*W, C)
+        
+#     #     num_samples, num_channels = features.shape
+#     #     actual_components = min(n_components, num_samples)
+
+#     #     try:
+#     #         # Torch Tensor → CuPy 변환 (GPU에서 연산하기 위해)
+#     #         features_gpu = cp.asarray(features.T.detach().cpu().numpy())  # NumPy 변환 후 CuPy로 변환
+
+#     #         # cuML GPU 기반 PCA 실행
+#     #         pca = PCA(n_components=actual_components, svd_solver='auto', output_type='cupy')
+#     #         reduced_features_gpu = pca.fit_transform(features_gpu)  # (actual_components, C)
+
+#     #         # CuPy → Torch Tensor 변환
+#     #         reduced_features = torch.tensor(cp.asnumpy(reduced_features_gpu), dtype=dtype, device=device).T
+#     #     except Exception as e:
+#     #         print(f"PCA failed: {e}")
+#     #         reduced_features = features[:actual_components]
+
+#     #     prototypes.append(reduced_features)
+    
+#     total_features = []
+#     for i in range(len(feature_maps)//shot):
+#         shot_feautures = []
+#         for s in range(shot):
+#             shot_feautures.append(feature_maps[shot*i + s])
+#         total_features.append(torch.cat(shot_feautures, dim=0).to(feature_maps[0].device))
+        
+        
+#     for i in range(len(feature_maps)//shot):
+#         features = total_features[i]  # (H*W, C)
+        
+#         actual_components = n_components * shot
+#         try:
+#             # Torch Tensor → CuPy 변환 (GPU에서 연산하기 위해)
+#             features_gpu = cp.asarray(features.T.contiguous())  # NumPy 변환 후 CuPy로 변환
+
+#             # cuML GPU 기반 PCA 실행
+#             pca =  PCA(n_components=actual_components, svd_solver='auto', output_type='cupy')
+#             reduced_features_gpu = pca.fit_transform(features_gpu)  # (actual_components, C)
+
+#             # CuPy → Torch Tensor 변환
+#             # reduced_features = torch.tensor(cp.asnumpy(reduced_features_gpu), dtype=dtype, device=device).T
+#             reduced_features = torch.as_tensor(reduced_features_gpu, dtype=dtype, device=device).T
+#         except Exception as e:
+#             print(f"PCA failed: {e}")
+#             reduced_features = features[:actual_components]
+
+#         for j in range(shot):
+#             prototypes.append(reduced_features[j*n_components:(j+1)*n_components])
+    
+
+#     return torch.stack(prototypes, dim=0)  # (B, max_components, C)
 
 def clustering_cuml_kmeans(support_features, N_clusters):
     normal_supp_feat_cudf = cp.asarray(support_features.detach().cpu().numpy())
@@ -167,6 +246,37 @@ class SOFS_class(nn.Module):
             return multi_scale_features_
         else:
             return multi_scale_features
+        
+        
+        
+        
+    
+    def feature_class_processing_vit(self, features, mask=None):
+        #! 이거 주의
+        if self.cfg.TRAIN.backbone in ["dinov2_vitg14_reg"]:
+            diff = 1374-1369 # 5
+        else:
+            diff = 1
+        B, L, C = features[0][:, 0:1, :].shape
+        h = w = int(math.sqrt(L))
+        # breakpoint()
+        multi_scale_features = [each_feature[:, 0:1, :].reshape(B, h, w, C).permute(0, 3, 1, 2)
+                                for each_feature in features]
+        if mask is not None:
+            # due to the missing mask, we do not use the mask in this stage for HDM and PFE
+            multi_scale_features_ = []
+            for each_feature in multi_scale_features:
+                tmp_mask = F.interpolate(mask,
+                                         size=(each_feature.size(2),
+                                               each_feature.size(3)),
+                                         mode="bilinear",
+                                         align_corners=False)
+                multi_scale_features_.append(each_feature * tmp_mask)
+            # multi scale feature를 mask와 각각 곱함 mask의 크기에 맞게
+            
+            return multi_scale_features_
+        else:
+            return multi_scale_features
 
     def feature_processing_cnn(self, features):
         bs, _, h, w = features[0].shape
@@ -254,6 +364,31 @@ class SOFS_class(nn.Module):
                 support_features = self.feature_processing_vit(support_multi_scale_features)
             elif self.cfg.TRAIN.backbone in ["resnet50", "wideresnet50", 'antialiased_wide_resnet50_2']:
                 support_features = self.feature_processing_cnn(support_multi_scale_features)
+                
+                
+            # #! Print log here!
+            # if self.cfg.TRAIN.backbone in ['dinov2_vitb14', "dinov2_vitl14", "dinov2_vitg14_reg"]:
+            #     query_class_features = self.feature_class_processing_vit(query_multi_scale_features)
+                
+            #     support_class_features = self.feature_class_processing_vit(support_multi_scale_features)
+            # similarity = 0
+            # for idx, layer_pointer in enumerate(self.prior_layer_pointer):
+            #     exec("query_class_feat_{}=query_class_features[{}]".format(layer_pointer, idx))
+            #     query_class = eval('query_class_feat_' + str(layer_pointer)).squeeze()
+                
+                
+            #     query_class = query_class.repeat(self.shot, 1)
+                
+                
+            #     exec("support_class_feat_{}=support_class_features[{}]".format(layer_pointer, idx))
+            #     support_class = eval('support_class_feat_' + str(layer_pointer)).squeeze()
+                
+            #     similarity += F.cosine_similarity(query_class.flatten(), support_class.flatten(), dim=0) / support_class.shape[0]
+            
+            # similarity /= len(self.prior_layer_pointer)
+        
+                
+            # LOGGER.info(f'mask size: {s_y.mean()}, similarity: {similarity}')
             
             for idx, layer_pointer in enumerate(self.prior_layer_pointer):
                 exec("supp_feat_{}=support_features[{}]".format(layer_pointer, idx))
@@ -294,6 +429,8 @@ class SOFS_class(nn.Module):
                 # prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
                 
                 prototype_r = parallel_cluster_prototypes_Kmeans(normal_supp_feat, N_clusters)
+                
+                # prototype_r = extract_pca_prototypes_gpu(normal_supp_feat, n_components=N_clusters, shot=self.shot)
                                 
                 ##############################################
                 ############ clustering by cuml ##############
@@ -328,7 +465,11 @@ class SOFS_class(nn.Module):
                 query_feat = query_features[i].view(batch_size, C, H*W) 
                 
                 
-
+                
+                
+                
+                    
+                
                 # ##########################################################
                 # ####################### apply cdam #######################
 
@@ -359,7 +500,7 @@ class SOFS_class(nn.Module):
 
                     _,ts,_,_,_ = all_proto_b.size()
                     s_x = all_proto_b.reshape(bs,1,ts,d)
-                    s_x_norm = s_x / s_x.norm(dim=-1, keepdim=True)
+                    s_x_norm = s_x / s_x.norm(dim=1, keepdim=True)
                     shots = s_x_norm.size(1)
 
                     ### from cdam ###
