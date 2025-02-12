@@ -457,7 +457,7 @@ def epoch_validate_non_resize_ss(val_loader, model, epoch, cfg, rand_seed, mode=
     
     
     count =  {}
-    file_count = 20
+    file_count = 5
     for i, data in enumerate(val_loader):
         
 
@@ -496,7 +496,7 @@ def epoch_validate_non_resize_ss(val_loader, model, epoch, cfg, rand_seed, mode=
         if input.dim() == 4:
             start_time = time.time()
             if current_method in ["SOFS"]:
-                output = model(s_x=s_input, s_y=s_mask, x=input)
+                output, mask_mean, similarity_mean = model(s_x=s_input, s_y=s_mask, x=input)
             else:
                 raise NotImplementedError
 
@@ -528,6 +528,8 @@ def epoch_validate_non_resize_ss(val_loader, model, epoch, cfg, rand_seed, mode=
             start_time = time.time()
             if current_method in ["SOFS"]:
                 output_total = []
+                mask_val = 0
+                sim_val = 0
                 for pointer_idx in range(iter_num):
                     init_val = pointer_idx * cfg.TEST_SETUPS.ND_batch_size
                     _, gs, c, h, w = input.shape
@@ -541,11 +543,17 @@ def epoch_validate_non_resize_ss(val_loader, model, epoch, cfg, rand_seed, mode=
                     support_mask_m = s_mask.repeat(multiple_bs, 1, 1, 1, 1)
                     query_input_m = input[:, init_val: init_val + multiple_bs, ...].reshape(1 * multiple_bs, c, h, w)
 
-                    tmp_output = model(s_x=support_input_m, s_y=support_mask_m, x=query_input_m)
+                    tmp_output, mask_mean, similarity_mean  = model(s_x=support_input_m, s_y=support_mask_m, x=query_input_m)
+                    
                     output_total.append(tmp_output)
 
+                    mask_val+= mask_mean
+                    sim_val += similarity_mean
+                    
+                mask_val /= iter_num
+                sim_val /= iter_num
                 output_total = torch.concat(output_total, dim=0)
-
+            tmp_fb_iou = []
             for query_idx in range(grid_size):
                 current_position = img_position_list[query_idx]
                 current_position = [int(i) for i in current_position]
@@ -577,11 +585,31 @@ def epoch_validate_non_resize_ss(val_loader, model, epoch, cfg, rand_seed, mode=
                         output_absolute_val=output_absolute_val,
                         output_heatmap=output_heatmap
                     )
+                
+                
+                #! print miou per patch 
+                # LOGGER.info(f"target : {target.shape} ")
+                reshaped_mask = target.squeeze(0).squeeze(0)[:int(query_original_shape[0]), :int(query_original_shape[1])]
+                
+                reshaped_mask = reshaped_mask[top: down, left: right]
+                normed_output = output_absolute_val 
+                tmp_intersection, tmp_union, _ = intersectionAndUnionGPU(normed_output, reshaped_mask, 2, 255)
+                
+                # tmp_fb_iou.append((tmp_intersection / tmp_union).unsqueeze(0))
+                
+                iou_value = tmp_intersection / tmp_union
+                if not torch.any(torch.isnan(iou_value)):
+                    tmp_fb_iou.append(iou_value.unsqueeze(0))
 
+                    
+               
+                
                 original_output[query_idx, top: down, left: right] = output_absolute_val.cpu()
                 original_heatmap[query_idx, top: down, left: right] = output_heatmap.cpu()
                 original_position[query_idx, top: down, left: right] = 1
 
+            tmp_fb_iou = torch.stack(tmp_fb_iou, dim=0).mean(0).squeeze(0)
+            LOGGER.info(f"mask_size : {mask_val}, similarity: {sim_val}, background_iou : {tmp_fb_iou[0]} foreground_iou : {tmp_fb_iou[1]}")
             model_time.update(time.time() - start_time)
             # return h, w
             original_output = torch.sum(original_output, dim=0) / torch.sum(original_position, dim=0)

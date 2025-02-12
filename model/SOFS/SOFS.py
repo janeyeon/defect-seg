@@ -366,26 +366,26 @@ class SOFS_class(nn.Module):
                 support_features = self.feature_processing_cnn(support_multi_scale_features)
                 
                 
-            # #! Print log here!
-            # if self.cfg.TRAIN.backbone in ['dinov2_vitb14', "dinov2_vitl14", "dinov2_vitg14_reg"]:
-            #     query_class_features = self.feature_class_processing_vit(query_multi_scale_features)
+            #! Print log here!
+            if self.cfg.TRAIN.backbone in ['dinov2_vitb14', "dinov2_vitl14", "dinov2_vitg14_reg"]:
+                query_class_features = self.feature_class_processing_vit(query_multi_scale_features)
                 
-            #     support_class_features = self.feature_class_processing_vit(support_multi_scale_features)
-            # similarity = 0
-            # for idx, layer_pointer in enumerate(self.prior_layer_pointer):
-            #     exec("query_class_feat_{}=query_class_features[{}]".format(layer_pointer, idx))
-            #     query_class = eval('query_class_feat_' + str(layer_pointer)).squeeze()
-                
-                
-            #     query_class = query_class.repeat(self.shot, 1)
+                support_class_features = self.feature_class_processing_vit(support_multi_scale_features)
+            similarity = 0
+            for idx, layer_pointer in enumerate(self.prior_layer_pointer):
+                exec("query_class_feat_{}=query_class_features[{}]".format(layer_pointer, idx))
+                query_class = eval('query_class_feat_' + str(layer_pointer)).squeeze()
                 
                 
-            #     exec("support_class_feat_{}=support_class_features[{}]".format(layer_pointer, idx))
-            #     support_class = eval('support_class_feat_' + str(layer_pointer)).squeeze()
+                query_class = query_class.repeat(self.shot, 1)
                 
-            #     similarity += F.cosine_similarity(query_class.flatten(), support_class.flatten(), dim=0) / support_class.shape[0]
+                
+                exec("support_class_feat_{}=support_class_features[{}]".format(layer_pointer, idx))
+                support_class = eval('support_class_feat_' + str(layer_pointer)).squeeze()
+                
+                similarity += F.cosine_similarity(query_class.flatten(), support_class.flatten(), dim=0) / support_class.shape[0]
             
-            # similarity /= len(self.prior_layer_pointer)
+            similarity /= len(self.prior_layer_pointer)
         
                 
             # LOGGER.info(f'mask size: {s_y.mean()}, similarity: {similarity}')
@@ -680,9 +680,9 @@ class SOFS_class(nn.Module):
             
             feature_masks = [fm.view(batch_size, H, W) for fm in feature_masks]
             semantic_similarity = torch.stack(feature_masks, dim=1)  # (4, 6, 37, 37)            
+
         
-        
-        return semantic_similarity
+        return semantic_similarity, s_y.mean(), similarity
     
     def normalize_mask(self, mask):
         # mask : [4, 6, 37, 37]
@@ -752,7 +752,8 @@ class SOFS_class(nn.Module):
         # final_out, mask_weight, each_normal_similarity, query_multi_scale_features, support_multi_scale_features, mask, sim_loss = self.generate_query_label(x, s_x, s_y)
         
        # final_out = self.generate_query_label(x, s_x, s_y)[:, 0, ...] # 4, 37, 37
-        final_out = self.generate_query_label(x, s_x, s_y).mean(1)
+        final_out, mask, similarity =self.generate_query_label(x, s_x, s_y)
+        final_out = final_out.mean(1)
         # masked_x = self.apply_binary_mask(x, final_out)
         
         # mask_weight_ = mask_weight.unsqueeze(1).unsqueeze(1)
@@ -776,4 +777,4 @@ class SOFS_class(nn.Module):
         final_out = torch.cat([background, foreground], dim=1) # 4, 2, 512, 512
 
 
-        return final_out
+        return final_out, mask, similarity 

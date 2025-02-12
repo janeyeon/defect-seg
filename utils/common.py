@@ -333,9 +333,10 @@ def produce_qualitative_result(
     ohm = ohm.cpu().numpy()  # h, w
 
     original_mask = original_mask.cpu().numpy()
-    original_img_path = os.path.join(source_path, query_object, query_filename)
+    original_img_path = os.path.join(source_path, query_object,query_object,  query_filename)
 
-    img = cv2.imread(original_img_path, cv2.IMREAD_COLOR)
+    # img = cv2.imread(original_img_path, cv2.IMREAD_COLOR)
+    img = cv2.imread(original_img_path, cv2.IMREAD_UNCHANGED)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
     true_rgba = generate_rgba(original_mask, rgba)
