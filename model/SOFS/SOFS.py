@@ -31,7 +31,12 @@ from cuml.decomposition import PCA
 
 from tools.epoch_train_eval_ss import LOGGER
 
+# def sigmoid_cluster(support_ratio, k=10, x0=0.25):
+#     sigmoid = 1 / (1 + torch.exp(-k * (support_ratio - x0)))
+#     return int(20.04 - 40.08 * sigmoid)
 
+def sigmoid_scaling(x, alpha=0.5):
+    return 1 + (2 / (1 +torch.exp(-alpha * (x - 1))) - 1)
 # def extract_pca_prototypes_gpu(feature_maps, n_components=70, shot=4):
 #     """
 #     Extracts prototypes from feature maps using GPU-accelerated PCA (cuML).
@@ -422,11 +427,16 @@ class SOFS_class(nn.Module):
                 normal_supp_feat = [n.view(-1, C) for n in normal_supp_feat]
 
                 #! 이 부분 갯수를 support mask 크기에 따라서 바꾸기
-                N_clusters = 70
+                # N_clusters = 70
                 # 프로토타입 계산 (벡터화)
                 
                 # thread or GPU
                 # prototype_r = torch.stack([cluster_prototypes_Kmeans(normal_supp_feat[b], N_clusters) for b in range(B)], dim=0)  # 16, N_clusters, 768 (batch_size * shot = B)
+                support_ratio = mask_flat.mean()
+                # N_clusters = int(20.04 - 40.08 * support_ratio) + 30
+                # N_clusters = sigmoid_cluster(support_ratio) + 40
+                N_clusters = 70
+                # 대충 0.001에서 0값, 0.5에서 20정도 값을 가지도록 설계해놓은 함수 
                 
                 prototype_r = parallel_cluster_prototypes_Kmeans(normal_supp_feat, N_clusters)
                 
@@ -451,8 +461,6 @@ class SOFS_class(nn.Module):
 
                 ############ clustering by cuml ##############
                 ##############################################
-
-                
                 
                 prototype_r = prototype_r.unsqueeze(-1).unsqueeze(-1).view(batch_size, -1, C, 1, 1) # 16, N_clusters, 768, 1, 1
                 
@@ -484,7 +492,7 @@ class SOFS_class(nn.Module):
 
                     T = 0.1 # 0.1 # 0.2 for voc
                     P = 0.1 #[0.1,0.1,0.1,0.1] # 0.1
-                    cdam_coef = 0.5
+                    cdam_coef = 0.1
                     # cdam_coef = 0.1
 
                     device = query_feat.device
@@ -774,7 +782,16 @@ class SOFS_class(nn.Module):
         final_out = final_out.unsqueeze(1)
         foreground = final_out
         background = 1-final_out
-        final_out = torch.cat([background, foreground], dim=1) # 4, 2, 512, 512
+        foreground_mask = torch.where(foreground > 0.5, 1,0).to(dtype=torch.float32)
+        
+        if foreground_mask.mean() > 0:
+            ratio = sigmoid_scaling(mask / foreground_mask.mean())
+            # ratio = torch.sqrt(mask / foreground_mask.mean())
+            foreground_mask = torch.where(foreground > 0.5 * ratio, 1,0).to(dtype=torch.float32)
+            final_out = torch.cat([1-foreground_mask, foreground_mask], dim=1) # 4, 2, 512, 512
+        else: 
+            final_out = torch.cat([1-foreground_mask, foreground_mask], dim=1) # 4, 2, 512, 512
 
+        LOGGER.info(f'support mask {mask}, query mask : {foreground_mask.mean()}') 
 
         return final_out, mask, similarity 

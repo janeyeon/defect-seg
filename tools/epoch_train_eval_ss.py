@@ -457,7 +457,7 @@ def epoch_validate_non_resize_ss(val_loader, model, epoch, cfg, rand_seed, mode=
     
     
     count =  {}
-    file_count = 5
+    file_count = 10
     for i, data in enumerate(val_loader):
         
 
@@ -587,19 +587,19 @@ def epoch_validate_non_resize_ss(val_loader, model, epoch, cfg, rand_seed, mode=
                     )
                 
                 
-                #! print miou per patch 
-                # LOGGER.info(f"target : {target.shape} ")
-                reshaped_mask = target.squeeze(0).squeeze(0)[:int(query_original_shape[0]), :int(query_original_shape[1])]
+                # #! print miou per patch 
+                # # LOGGER.info(f"target : {target.shape} ")
+                # reshaped_mask = target.squeeze(0).squeeze(0)[:int(query_original_shape[0]), :int(query_original_shape[1])]
                 
-                reshaped_mask = reshaped_mask[top: down, left: right]
-                normed_output = output_absolute_val 
-                tmp_intersection, tmp_union, _ = intersectionAndUnionGPU(normed_output, reshaped_mask, 2, 255)
+                # reshaped_mask = reshaped_mask[top: down, left: right]
+                # normed_output = output_absolute_val 
+                # tmp_intersection, tmp_union, _ = intersectionAndUnionGPU(normed_output, reshaped_mask, 2, 255)
                 
-                # tmp_fb_iou.append((tmp_intersection / tmp_union).unsqueeze(0))
+                # # tmp_fb_iou.append((tmp_intersection / tmp_union).unsqueeze(0))
                 
-                iou_value = tmp_intersection / tmp_union
-                if not torch.any(torch.isnan(iou_value)):
-                    tmp_fb_iou.append(iou_value.unsqueeze(0))
+                # iou_value = tmp_intersection / tmp_union
+                # if not torch.any(torch.isnan(iou_value)):
+                #     tmp_fb_iou.append(iou_value.unsqueeze(0))
 
                     
                
@@ -608,8 +608,12 @@ def epoch_validate_non_resize_ss(val_loader, model, epoch, cfg, rand_seed, mode=
                 original_heatmap[query_idx, top: down, left: right] = output_heatmap.cpu()
                 original_position[query_idx, top: down, left: right] = 1
 
-            tmp_fb_iou = torch.stack(tmp_fb_iou, dim=0).mean(0).squeeze(0)
-            LOGGER.info(f"mask_size : {mask_val}, similarity: {sim_val}, background_iou : {tmp_fb_iou[0]} foreground_iou : {tmp_fb_iou[1]}")
+            #! print miou per patch 
+            # tmp_fb_iou = torch.stack(tmp_fb_iou, dim=0).mean(0).squeeze(0)
+            # LOGGER.info(f"mask_size : {mask_val}, similarity: {sim_val}, background_iou : {tmp_fb_iou[0]} foreground_iou : {tmp_fb_iou[1]}")
+            
+            
+            
             model_time.update(time.time() - start_time)
             # return h, w
             original_output = torch.sum(original_output, dim=0) / torch.sum(original_position, dim=0)
